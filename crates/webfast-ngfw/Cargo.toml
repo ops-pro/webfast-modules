@@ -1,0 +1,61 @@
+[package]
+name = "webfast-ngfw"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "The NGFW request filter of webfast: rules over the request's head, body and uploads and over proxied responses, countries, ASNs, address lists and feeds, a ban list; a module on webfast-core's module API"
+readme = "../../README.md"
+keywords = ["http", "web-server", "waf", "caddyfile"]
+categories = ["web-programming::http-server"]
+
+[lib]
+name = "webfast_ngfw"
+path = "src/lib.rs"
+
+[features]
+default = ["challenge"]
+# The browser challenge as an answer (`action: challenge`, `mode: challenge`, `access.*.challenge`,
+# `access.ban.then: challenge`; docs/challenge.md "From the request filter"): the webfast-challenge
+# crate. Without the feature a file that asks for a challenge does not load.
+challenge = ["dep:webfast-challenge"]
+
+[dependencies]
+# The core, with its HTTPS client: the feeds are read with it (src/iplist.rs).
+webfast-core = { workspace = true, features = ["fetch"] }
+webfast-challenge = { path = "../webfast-challenge", version = "0.1.0", optional = true }
+# One automaton over every rule's literals (src/compile.rs); the regexes of the rules that need one.
+aho-corasick.workspace = true
+regex.workspace = true
+# MaxMind DB files for countries and ASNs (src/geo.rs).
+maxminddb.workspace = true
+# The byte searches of the multipart parser (src/multipart.rs).
+memchr.workspace = true
+anyhow.workspace = true
+# The loaded state under one pointer, swapped whole by a reload.
+arc-swap.workspace = true
+bytes.workspace = true
+http.workspace = true
+http-body.workspace = true
+http-body-util.workspace = true
+ipnet.workspace = true
+percent-encoding.workspace = true
+rustc-hash.workspace = true
+# The module's YAML file (through webfast_core::yaml) and the rule sets.
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+# The harness: a server from a Caddyfile text, raw HTTP/1.1 to it (crates/webfast-core/src/harness.rs).
+webfast-core = { workspace = true, features = ["test-harness"] }
+# The tests' upstream stub (tests/ngfw.rs).
+hyper.workspace = true
+hyper-util.workspace = true
+tempfile.workspace = true
+tokio-stream.workspace = true
+# The challenge cases hash the nonce as the page's script would.
+aws-lc-rs.workspace = true

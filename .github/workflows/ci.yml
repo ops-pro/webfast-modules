@@ -1,0 +1,75 @@
+# The checks of scripts/check.sh on every push and pull request: formatting, clippy on both crates
+# of the workspace with every feature and without the defaults (the filter without the challenge),
+# the tests on x86-64 and arm64, the tests on the minimum Rust (Cargo.toml's rust-version), and
+# cargo-deny (advisories, licenses, bans, sources).
+name: CI
+
+on:
+  push:
+    branches: [main, dev-ci]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  fmt:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all --check
+
+  clippy:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: every feature, both crates
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - name: each crate without its defaults (the filter without the challenge)
+        run: |
+          cargo clippy --locked -p webfast-ngfw --all-targets --no-default-features -- -D warnings
+          cargo clippy --locked -p webfast-challenge --all-targets --no-default-features -- -D warnings
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --locked --workspace
+
+  msrv:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: the minimum Rust, from Cargo.toml
+        id: msrv
+        run: echo "version=$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --locked --workspace
+
+  deny:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check

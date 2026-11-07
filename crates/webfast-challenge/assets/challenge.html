@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>{challenge.title}</title>
+<style>
+:root{color-scheme:light dark}
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#fff;color:#1c1c1e;font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{width:100%;max-width:480px;margin:24px;padding:32px 28px;border:1px solid #e3e3e6;border-radius:12px;box-sizing:border-box;text-align:center}
+h1{margin:0 0 4px;font-size:22px;font-weight:600;word-break:break-all}
+h2{margin:0 0 24px;font-size:16px;font-weight:400;color:#6e6e73}
+.spin{width:36px;height:36px;margin:0 auto 18px;border:3px solid #e3e3e6;border-top-color:#1c1c1e;border-radius:50%;animation:r .8s linear infinite}
+@keyframes r{to{transform:rotate(360deg)}}
+p{margin:12px 0}
+progress{width:100%;height:6px;appearance:none;border:0;background:#e3e3e6;border-radius:3px;overflow:hidden}
+progress::-webkit-progress-bar{background:#e3e3e6}
+progress::-webkit-progress-value,progress::-moz-progress-bar{background:#1c1c1e}
+#captcha{min-height:0;margin:16px auto;display:flex;justify-content:center}
+.err{color:#b3261e}
+footer{margin-top:28px;font-size:12px;color:#6e6e73}
+[hidden]{display:none!important}
+@media(prefers-color-scheme:dark){body{background:#1c1c1e;color:#f2f2f7}main{border-color:#3a3a3c}h2,footer{color:#98989d}.spin{border-color:#3a3a3c;border-top-color:#f2f2f7}progress,progress::-webkit-progress-bar{background:#3a3a3c}progress::-webkit-progress-value,progress::-moz-progress-bar{background:#f2f2f7}}
+</style>
+</head>
+<body data-nonce="{challenge.nonce}" data-level="{challenge.level}" data-difficulty="{challenge.difficulty}" data-site-key="{challenge.site_key}" data-provider="{challenge.provider}">
+<main>
+<h1>{challenge.host}</h1>
+<h2>{challenge.title}</h2>
+<div class="spin" id="s"></div>
+<p id="m"></p>
+<progress id="p" max="1000" value="0" hidden></progress>
+<div id="captcha"></div>
+<p class="err" id="e" hidden></p>
+<noscript><p>This check needs JavaScript. Enable it and reload the page.</p></noscript>
+<footer>Request {challenge.request_id} &middot; webfast</footer>
+</main>
+<script>
+(function(){
+var d=document.body.dataset,N=d.nonce,L=d.level,D=+d.difficulty||0;
+function $(i){return document.getElementById(i)}
+function W(){var K=[],H=[],n=2,c=0,q,f;for(;c<64;n++){for(f=1,q=2;q*q<=n;q++)if(n%q==0)f=0;if(f){if(c<8)H[c]=(Math.sqrt(n)%1)*4294967296|0;K[c++]=(Math.pow(n,1/3)%1)*4294967296|0}}
+function R(x,n){return x>>>n|x<<32-n}
+return function(s){var m=[],l=s.length,i,j,w=[],a,b,c,d,e,f,g,h,t,u,v=H.slice();
+for(i=0;i<l;i++)m[i>>2]=(m[i>>2]|0)|s.charCodeAt(i)<<24-8*(i%4);
+m[l>>2]=(m[l>>2]|0)|128<<24-8*(l%4);m[(l+8>>6<<4)+15]=l*8;
+for(j=0;j<m.length;j+=16){a=v[0];b=v[1];c=v[2];d=v[3];e=v[4];f=v[5];g=v[6];h=v[7];
+for(i=0;i<64;i++){w[i]=i<16?m[j+i]|0:(R(w[i-2],17)^R(w[i-2],19)^w[i-2]>>>10)+w[i-7]+(R(w[i-15],7)^R(w[i-15],18)^w[i-15]>>>3)+w[i-16]|0;
+t=h+(R(e,6)^R(e,11)^R(e,25))+(e&f^~e&g)+K[i]+w[i]|0;u=(R(a,2)^R(a,13)^R(a,22))+(a&b^a&c^b&c)|0;
+h=g;g=f;f=e;e=d+t|0;d=c;c=b;b=a;a=t+u|0}
+v[0]=v[0]+a|0;v[1]=v[1]+b|0;v[2]=v[2]+c|0;v[3]=v[3]+d|0;v[4]=v[4]+e|0;v[5]=v[5]+f|0;v[6]=v[6]+g|0;v[7]=v[7]+h|0}
+return v}}
+function hex(v){var s="",i;for(i=0;i<8;i++)s+=("0000000"+(v[i]>>>0).toString(16)).slice(-8);return s}
+function err(t){$("e").textContent=t;$("e").hidden=false;$("s").hidden=true;$("p").hidden=true}
+function post(a){fetch("/.well-known/c-wf",{method:"POST",body:new URLSearchParams({nonce:N,answer:a,url:location.href}),credentials:"same-origin"}).then(function(r){
+if(r.status==204)location.reload();else err(r.status==403?"The check expired. Reload the page to try again.":"The check did not pass ("+r.status+"). Reload the page to try again.")
+}).catch(function(){err("The server could not be reached. Reload the page to try again.")})}
+$("m").textContent={js:"Verifying your browser",pow:"This takes a few seconds",captcha:"Please complete the check below"}[L]||"";
+if(L=="js"){post(hex(W()(N)))}
+else if(L=="pow"){$("p").hidden=false;var c="var sha=("+W+")();onmessage=function(e){var n=e.data[0],d=e.data[1],c=0,v,z;for(;;){v=sha(n+':'+c);z=Math.clz32(v[0]);if(z>31)z+=Math.clz32(v[1]);if(z>=d){postMessage([1,c]);return}c++;if(!(c&4095))postMessage([0,c])}}";
+try{var k=new Worker(URL.createObjectURL(new Blob([c],{type:"text/javascript"})));k.onmessage=function(e){if(e.data[0]){$("p").value=1000;post(""+e.data[1])}else $("p").value=Math.min(950,e.data[1]/Math.pow(2,D)*1000)};k.postMessage([N,D])}catch(x){err("This browser cannot run the check.")}}
+else if(L=="captcha"){var u={turnstile:"https://challenges.cloudflare.com/turnstile/v0/api.js",hcaptcha:"https://js.hcaptcha.com/1/api.js",recaptcha:"https://www.google.com/recaptcha/api.js"}[d.provider];
+window.wfc=function(){(window.turnstile||window.hcaptcha||window.grecaptcha).render($("captcha"),{sitekey:d.siteKey,callback:post});$("s").hidden=true};
+var t=document.createElement("script");t.src=u+"?onload=wfc&render=explicit";t.async=true;t.onerror=function(){err("The check could not be loaded.")};document.head.appendChild(t)}
+})();
+</script>
+</body>
+</html>

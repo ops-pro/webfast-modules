@@ -1,0 +1,81 @@
+# Set `php` (wf-933-*): PHP injection. Stream wrappers, PHP open tags in a parameter, the
+# dangerous functions called, the ini directives attackers set, serialized objects, and `.php`
+# followed by path info.
+# OWASP: A03 Injection. A site that is not PHP keeps the set: the payloads say what the client is.
+rules:
+  - id: wf-933-100
+    set: php
+    phase: head
+    msg: "PHP open tag in a parameter"
+    severity: critical
+    targets: [args, cookies, body]
+    transform: [url_decode, remove_nulls, lowercase, compress_whitespace]
+    operator: { contains_any: ['<?php', '<?='] }
+    tags: [OWASP_A03, injection, php]
+
+  - id: wf-933-110
+    set: php
+    phase: head
+    msg: "PHP function that runs code, commands or files, called in a parameter"
+    severity: critical
+    targets: [args, cookies, body]
+    transform: [url_decode, remove_nulls, lowercase, compress_whitespace]
+    operator:
+      contains_any: ['eval(', 'system(', 'passthru(', 'shell_exec(', 'exec(', 'popen(', 'proc_open(',
+                     'assert(', 'create_function(', 'include(', 'require(', 'file_get_contents(',
+                     'file_put_contents(', 'unserialize(']
+    tags: [OWASP_A03, injection, php]
+
+  - id: wf-933-115
+    set: php
+    phase: head
+    msg: "preg_replace with the /e modifier"
+    severity: critical
+    targets: [args, cookies, body]
+    transform: [url_decode, remove_nulls, lowercase, compress_whitespace]
+    prefilter: ['preg_replace']
+    operator: { regex: 'preg_replace\s*\(.{0,200}?/[a-z]*e[a-z]*[''"]' }
+    tags: [OWASP_A03, injection, php]
+
+  - id: wf-933-120
+    set: php
+    phase: head
+    msg: "PHP stream wrapper in a parameter"
+    severity: critical
+    targets: [args, args_names, cookies, headers.referer, path]
+    transform: [url_decode, remove_nulls, lowercase, compress_whitespace]
+    operator: { contains_any: ['php://', 'phar://', 'data:', 'expect://', 'zip://', 'glob://'] }
+    tags: [OWASP_A03, injection, php]
+
+  - id: wf-933-130
+    set: php
+    phase: head
+    msg: "PHP ini directive name in a parameter"
+    severity: medium
+    targets: [args, args_names, cookies, body]
+    transform: [url_decode, remove_nulls, lowercase, compress_whitespace]
+    operator:
+      contains_any: [allow_url_include, auto_prepend_file, auto_append_file, disable_functions, open_basedir]
+    tags: [OWASP_A03, injection, php]
+
+  - id: wf-933-140
+    set: php
+    phase: head
+    msg: "Serialized PHP object or array in a parameter"
+    severity: high
+    targets: [args, cookies, body]
+    transform: [url_decode, remove_nulls, lowercase, compress_whitespace]
+    prefilter: [':"', ':{']
+    operator: { regex: '(?:^|[^a-z0-9_])[oa]:\d+:["{]' }
+    tags: [OWASP_A03, injection, php, deserialization]
+
+  - id: wf-933-150
+    set: php
+    phase: head
+    msg: ".php followed by path info (/a.php/b)"
+    severity: medium
+    targets: [path]
+    transform: [lowercase]
+    prefilter: ['.php']
+    operator: { regex: '\.ph(?:p[0-9]?|tml|ar)/' }
+    tags: [OWASP_A03, injection, php, pathinfo]

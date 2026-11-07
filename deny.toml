@@ -1,0 +1,45 @@
+# cargo-deny (scripts/check.sh deny, CI): known vulnerabilities, licenses, banned and duplicate
+# crates, and where crates come from — webfast's deny.toml, with the core's own repository as the
+# one git source.
+
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+# RustSec: a vulnerability in any crate fails; an unmaintained one only when we depend on it directly.
+unmaintained = "workspace"
+yanked = "deny"
+
+[licenses]
+version = 2
+# Every license in the dependency graph today; a new one has to be looked at and added here.
+allow = [
+  "0BSD",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-3-Clause",
+  "CC0-1.0",
+  "ISC",
+  "MIT",
+  "MIT-0",
+  "Unicode-3.0",
+  "Unlicense",
+  "Zlib",
+]
+confidence-threshold = 0.9
+# webpki-roots: Mozilla's root certificates as data, for the feeds and the CAPTCHA providers fetched
+# over HTTPS (the core's `fetch`; the image has no CA store). CDLA-Permissive-2.0 is a permissive
+# license for data.
+exceptions = [{ crate = "webpki-roots", allow = ["CDLA-Permissive-2.0"] }]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# The core, from webfast's repository (Cargo.toml [workspace.dependencies]).
+allow-git = ["https://github.com/ops-pro/webfast"]

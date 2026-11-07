@@ -1,0 +1,68 @@
+# Set `scanners` (wf-913-*): the tools and the probes. User-Agents of vulnerability scanners and
+# brute-forcers, the paths they try everywhere (dot-files, version control, WordPress, admin
+# tools, framework endpoints), backups left in the site root. Every rule blocks at once: nothing
+# of this comes from a browser or an honest client.
+# OWASP: A05 Security Misconfiguration (what the probes look for). A site that is what a rule
+# probes for turns it off: a WordPress site disables wf-913-200 (`disable: [wf-913-200]`), a
+# site with a real /actuator/ excludes wf-913-220 on that path (docs/configuration.md).
+rules:
+  - id: wf-913-100
+    set: scanners
+    phase: head
+    msg: "User-Agent of a vulnerability scanner"
+    severity: critical
+    targets: [ua]
+    transform: [lowercase]
+    operator:
+      contains_any: [sqlmap, nikto, nuclei, masscan, zgrab, nmap, dirbuster, gobuster, wpscan,
+                     acunetix, nessus, openvas, burp, havij, arachni, w3af, whatweb]
+    action: block
+    tags: [OWASP_A05, scanner, user-agent]
+
+  - id: wf-913-200
+    set: scanners
+    phase: head
+    msg: "WordPress probe on a site that is not WordPress"
+    severity: critical
+    targets: [path]
+    transform: [lowercase]
+    operator: { contains_any: ['/wp-login.php', '/wp-admin/', '/xmlrpc.php'] }
+    action: block
+    tags: [OWASP_A05, scanner, probe, wordpress]
+
+  - id: wf-913-210
+    set: scanners
+    phase: head
+    msg: "Probe for a dot-file: environment, version control, editor and cloud settings"
+    severity: critical
+    targets: [path]
+    transform: [lowercase]
+    operator:
+      contains_any: ['/.env', '/.git/', '/.svn/', '/.hg/', '/.ds_store', '/.aws/', '/.htpasswd', '/.vscode/']
+    action: block
+    tags: [OWASP_A05, scanner, probe, dotfile]
+
+  - id: wf-913-220
+    set: scanners
+    phase: head
+    msg: "Probe for an admin tool, a framework endpoint or a router interface"
+    severity: critical
+    targets: [path]
+    transform: [lowercase]
+    operator:
+      contains_any: ['/phpmyadmin', '/pma/', '/adminer', '/actuator/', '/server-status',
+                     '/vendor/phpunit', '/cgi-bin/', '/boaform/', '/hnap1']
+    action: block
+    tags: [OWASP_A05, scanner, probe, admin]
+
+  - id: wf-913-230
+    set: scanners
+    phase: head
+    msg: "Backup, dump or configuration file asked for in the site root"
+    severity: critical
+    targets: [path]
+    transform: [lowercase]
+    prefilter: ['.bak', '.sql', '.zip', '.tar.gz', '.old', '.orig', '.swp', '/config.json']
+    operator: { regex: '^/(?:[^/]+\.(?:bak|sql|zip|tar\.gz|old|orig|swp)|config\.json)$' }
+    action: block
+    tags: [OWASP_A05, scanner, probe, backup]

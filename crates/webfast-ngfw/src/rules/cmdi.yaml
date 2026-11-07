@@ -1,0 +1,37 @@
+# Set `cmdi` (wf-932-*): operating system command injection. A shell metacharacter followed by a
+# command name, the shells and interpreters by path, a newline followed by a command.
+# OWASP: A03 Injection.
+rules:
+  - id: wf-932-100
+    set: cmdi
+    phase: head
+    msg: "Shell metacharacter followed by a command name"
+    severity: critical
+    targets: [args, cookies, body]
+    transform: [url_decode, remove_nulls, lowercase, cmd_line]
+    prefilter: [';', '|', '&', '`', '$(']
+    operator:
+      regex: '(?:[;|&`]|\$\()\s*(?:cat|ls|id|whoami|uname|wget|curl|nc|bash|sh|python[0-9.]*|perl|php[0-9.]*|chmod|rm|sleep|ping)(?:[^a-z0-9_-]|$)'
+    tags: [OWASP_A03, injection, cmdi]
+
+  - id: wf-932-110
+    set: cmdi
+    phase: head
+    msg: "Shell or interpreter named by path"
+    severity: critical
+    targets: [args, cookies, path_raw, body]
+    transform: [url_decode, remove_nulls, lowercase, cmd_line]
+    operator: { contains_any: ['/bin/sh', '/bin/bash', 'cmd.exe', 'powershell'] }
+    tags: [OWASP_A03, injection, cmdi]
+
+  - id: wf-932-120
+    set: cmdi
+    phase: head
+    msg: "Newline (%0a) followed by a command name"
+    severity: high
+    targets: [args, query, path_raw, cookies]
+    transform: [url_decode, remove_nulls, lowercase]
+    prefilter: ["\n"]
+    operator:
+      regex: '\n\s*(?:cat|ls|id|whoami|uname|wget|curl|nc|bash|sh|python[0-9.]*|perl|php[0-9.]*|chmod|rm|sleep|ping)(?:[^a-z0-9_-]|$)'
+    tags: [OWASP_A03, injection, cmdi]

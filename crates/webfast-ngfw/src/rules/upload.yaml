@@ -1,0 +1,100 @@
+# Set `upload` (wf-960-*): file uploads (the `upload` phase, each multipart part with a
+# filename). Executable extensions anywhere in the name (double extensions too), names that
+# traverse or carry control characters, server configuration files, declared script types, a
+# declared image or PDF whose bytes are something else, a script or PHP tag at the start of a
+# file, too many parts.
+# OWASP: A04 Insecure Design (unrestricted file upload). A site that takes only images writes
+# its own `upload.ext` rule with `action: block` on everything not in its list
+# (docs/configuration.md, Request filter).
+rules:
+  - id: wf-960-100
+    set: upload
+    phase: upload
+    msg: "Upload file name with a path separator, .., a null or a control character"
+    severity: high
+    targets: [upload.filename]
+    transform: [url_decode]
+    operator:
+      contains_any: ['/', '\', '..', "\x00", "\x01", "\x02", "\x03", "\x04", "\x05", "\x06", "\x07",
+                     "\x08", "\x09", "\x0a", "\x0b", "\x0c", "\x0d", "\x0e", "\x0f", "\x10", "\x11",
+                     "\x12", "\x13", "\x14", "\x15", "\x16", "\x17", "\x18", "\x19", "\x1a", "\x1b",
+                     "\x1c", "\x1d", "\x1e", "\x1f", "\x7f"]
+    tags: [OWASP_A04, upload, traversal]
+
+  - id: wf-960-105
+    set: upload
+    phase: upload
+    msg: "Upload file name over 255 bytes"
+    severity: medium
+    targets: [upload.filename]
+    transform: []
+    operator: { length_gt: 255 }
+    tags: [OWASP_A04, upload, size]
+
+  - id: wf-960-110
+    set: upload
+    phase: upload
+    msg: "Executable extension in an uploaded file's name"
+    severity: critical
+    targets: [upload.ext]
+    transform: [url_decode, remove_nulls, lowercase]
+    prefilter: [php, phtml, pht, phar, phps, inc, htaccess, htpasswd, ini, cgi, pl, py, sh, bash, jsp,
+                jspx, asp, aspx, ashx, asmx, cer, soap, exe, dll, bat, cmd, com, scr, vbs, js, hta]
+    # Each suffix after a dot is a value (`shot.php.jpg`: `php.jpg`, `jpg`, `php`), so the
+    # extension is at the start of a value and ends at a non-alphanumeric (`php;.jpg`, `php.jpg`
+    # after the null is removed) or at the end.
+    operator:
+      regex: '^(?:php[3-8]?|phtml|pht|phar|phps|inc|htaccess|htpasswd|ini|cgi|pl|py|sh|bash|jsp|jspx|asp|aspx|ashx|asmx|cer|soap|exe|dll|bat|cmd|com|scr|vbs|js|hta)(?:[^a-z0-9]|$)'
+    action: block
+    tags: [OWASP_A04, upload, webshell]
+
+  - id: wf-960-120
+    set: upload
+    phase: upload
+    msg: "Server configuration file uploaded (.htaccess, .user.ini, web.config, php.ini)"
+    severity: critical
+    targets: [upload.filename]
+    transform: [url_decode, remove_nulls, lowercase]
+    operator: { equals_any: ['.htaccess', '.user.ini', 'web.config', 'php.ini'] }
+    action: block
+    tags: [OWASP_A04, upload, configuration]
+
+  - id: wf-960-130
+    set: upload
+    phase: upload
+    msg: "Uploaded part declared as a PHP or shell script"
+    severity: critical
+    targets: [upload.type]
+    transform: [lowercase, compress_whitespace]
+    operator: { contains_any: ['application/x-php', 'application/x-httpd-php', 'text/x-php', 'application/x-sh'] }
+    tags: [OWASP_A04, upload, webshell]
+
+  - id: wf-960-140
+    set: upload
+    phase: upload
+    msg: "Uploaded file starts with a PHP tag or a shebang (a polyglot when declared an image or document)"
+    severity: high
+    targets: [upload.head]
+    transform: []
+    operator: { magic_is: [php, script] }
+    tags: [OWASP_A04, upload, webshell, polyglot]
+
+  - id: wf-960-150
+    set: upload
+    phase: upload
+    msg: "Uploaded file declared an image or PDF whose bytes are not one"
+    severity: high
+    targets: [upload.head]
+    transform: []
+    operator: { magic_not: [png, jpeg, gif, webp, pdf] }
+    tags: [OWASP_A04, upload, mismatch]
+
+  - id: wf-960-160
+    set: upload
+    phase: upload
+    msg: "More than 64 file parts in a multipart body"
+    severity: medium
+    targets: [upload.count]
+    transform: []
+    operator: { gt: 64 }
+    tags: [OWASP_A04, upload, size]

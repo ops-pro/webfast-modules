@@ -1,0 +1,137 @@
+# webfast-modules
+
+[![CI](https://github.com/ops-pro/webfast-modules/actions/workflows/ci.yml/badge.svg)](https://github.com/ops-pro/webfast-modules/actions/workflows/ci.yml)
+
+The optional modules of [webfast](https://github.com/ops-pro/webfast), each a crate on the module
+API of `webfast-core`
+([docs/modules.md](https://github.com/ops-pro/webfast/blob/main/docs/modules.md)): a `Module` the
+webfast binary registers, the Caddyfile directives it adds, its request checks and inspectors of
+proxied responses, its state loaded from its own files. The crates reach the core through
+`webfast_core::` paths alone and the core names neither; they are compiled into the webfast binary
+through its composition (`crates/webfast/src/compose.rs` there), where the order of the hooks is
+fixed at compile time.
+
+```
+crates/webfast-ngfw         the NGFW request filter     webfast_ngfw::MODULE, Ngfw, response::NgfwResponses
+crates/webfast-challenge    the browser challenge       webfast_challenge::MODULE, ChallengeEndpoint, Asking, Level
+docs/ngfw.md, docs/challenge.md
+```
+
+## The request filter: `webfast-ngfw`
+
+Requests refused, marked or logged by rules and by where they come from, on when `WEB_NGFW_CONFIG`
+names its YAML file. Eleven built-in sets of some seventy rules, numbered after the Core Rule Set
+sections: protocol anomalies, scanners and probes, path traversal, remote inclusion, command, PHP,
+SQL, template and script injection, file uploads, and error messages leaking in proxied responses
+(replaced by a 500 through `handle_errors` before the proxy cache keeps them). Access by the
+client's address (lists, files, feeds fetched on a schedule), country and ASN (MaxMind DB files),
+honeypot paths, and a ban list for repeat offenders. A site's own file extends, replaces, overrides
+or disables rules; `log_only` or `challenge` for the module, a set or a rule. The head decides
+synchronously and a clean request allocates nothing; the body is read only when its type is listed
+and there are rules for it. One JSON line per event in its own log; a reload (SIGHUP) reads the file
+again and keeps the old rules when the new do not load.
+
+```yaml
+# WEB_NGFW_CONFIG=/etc/webfast/ngfw.yaml
+mode: block                        # block | log_only | challenge
+threshold: 5
+log: { output: /var/log/web/ngfw.log }
+response: { status: 403, challenge: js }
+rules:
+  builtin: all
+  include: [rules/site.yaml]
+  disable: [wf-942-130]
+access:
+  ip: { allow: [10.0.0.0/8], feeds: [{ url: https://example.net/bad-ips.txt, every: 12h }] }
+  countries: { deny: [KP], challenge: [CN, RU] }
+  ban: { on_blocks: 5, window: 10m, for: 1h }
+```
+
+Its `challenge` feature (on by default) brings the browser challenge as an answer: `action:
+challenge`, `mode: challenge`, `access.*.challenge`, `access.ban.then: challenge`. Without it a file
+that asks for one does not load. [docs/ngfw.md](docs/ngfw.md).
+
+## The browser challenge: `webfast-challenge`
+
+A client proves it is a browser before a site answers it — by accepting a cookie, by running a
+small script, by a proof-of-work, or by a CAPTCHA (Turnstile, hCaptcha, reCAPTCHA) — and carries a
+signed cookie that spares it the question until it expires. Who asks is the `challenge` directive
+of a site, for every request it matches or only once a client is over a rate (`defer`), or the
+request filter. The server keeps no state per client: the cookie is checked by its signature, with
+the keys derived from the TLS ticket seed (`WEB_TLS_TICKET_SEED`), so every replica given the seed
+accepts the others' cookies; a cookie that verified is remembered in a bounded table
+(`WEB_CHALLENGE_PASSED`), so afterwards it is one hash lookup. The answer endpoint
+`POST /.well-known/c-wf` is served on every site; the page is the answer (503 with the nonce), not
+an error page.
+
+```caddyfile
+example.com {
+	challenge {
+		level pow                # cookie | js | pow | captcha
+		valid 7d
+		defer {                  # ask only a client over this rate
+			events 100
+			window 10m
+		}
+		except {
+			path /api/*
+		}
+	}
+	reverse_proxy app:8787
+}
+```
+
+[docs/challenge.md](docs/challenge.md).
+
+## Building and testing
+
+```sh
+cargo test --workspace                                   # unit tests and the end-to-end tests of both crates
+cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy -p webfast-ngfw --all-targets --no-default-features -- -D warnings   # the filter without the challenge
+scripts/check.sh                                         # the CI checks, in Docker
+```
+
+The end-to-end tests boot a server from a Caddyfile text with the core's test harness
+(`webfast_core::harness`, the core's cargo feature `test-harness`) and a composition of the crate
+under test, and speak HTTP/1.1 to it.
+
+`webfast-core` is a git dependency on the webfast repository (its `dev-ci` branch; `Cargo.lock`
+pins the commit). For work on both at once, copy `.cargo/config.toml.example` to
+`.cargo/config.toml` (ignored by git): its `[patch]` takes the core from a webfast checkout next
+to this one (`../webfast/crates/webfast-core`); the lock written with the patch in place has no
+source for the core, so run `cargo update -p webfast-core` without it before committing the lock.
+
+## How the webfast binary includes them
+
+webfast's binary crate (`crates/webfast`) depends on these crates by git and names them in its
+features: `ngfw` and `challenge`, both in its default set. Its `compose.rs` registers the modules
+and writes the order of their hooks as a type:
+
+```rust
+pub type Checks = (ChallengeEndpoint, (Option<Arc<Ngfw>>, ()));   // the challenge's endpoint, then the filter
+pub type Inspectors = (NgfwResponses, ());                          // the filter's response phase
+
+pub static MODULES: &[&dyn Module] = &[&webfast_challenge::MODULE, &webfast_ngfw::MODULE];
+
+fn hooks(config: &Config) -> (Checks, Inspectors) {
+    ((ChallengeEndpoint, (config.modules.get::<Ngfw>(), ())), (NgfwResponses, ()))
+}
+```
+
+A feature that is off puts `()` in the slot and a `module::Unbuilt` in the list, so a variable of a
+module that is not built stops the start instead of being ignored. Nothing here is a binary: the
+binary with the modules is webfast's release.
+
+## Branches and releases
+
+`main` is what is released; `dev-ci` is where development happens. CI (formatting, clippy with and
+without the default features, the tests on x86-64 and arm64, the minimum Rust, cargo-deny) runs on
+both and on pull requests. A release is a tag `vX.Y.Z` on `main`, as webfast's: the checks run
+again and a GitHub release is created with the version's section of [CHANGELOG.md](CHANGELOG.md)
+as its notes. No binaries are published here; webfast's release pins the tag of this repository its
+binary was built with.
+
+## License
+
+MIT or Apache-2.0, at your option ([LICENSE-MIT](LICENSE-MIT), [LICENSE-APACHE](LICENSE-APACHE)).

@@ -1,0 +1,30 @@
+# Set `rfi` (wf-931-*): remote file inclusion and server-side request forgery. A URL in a
+# parameter whose name says it is a target (url, src, redirect, file, ...) pointing at an
+# address, localhost, the cloud metadata services or a numeric address; the file, gopher and dict
+# schemes anywhere.
+# OWASP: A10 Server-Side Request Forgery (and A03 Injection for the include wrappers).
+rules:
+  - id: wf-931-100
+    set: rfi
+    phase: head
+    msg: "URL to an address, localhost or a metadata service in a target parameter"
+    severity: critical
+    targets: [args.url, args.uri, args.src, args.dest, args.redirect, args.next, args.path,
+              args.file, args.page, args.include, args.template, args.callback]
+    transform: [url_decode, remove_nulls, lowercase, compress_whitespace]
+    prefilter: ['://']
+    # Dotted (decimal or octal), hexadecimal, plain decimal (8 to 10 digits) and leading-zero octal
+    # addresses, localhost, the IPv6 loopback and the metadata hosts, with an optional port.
+    operator:
+      regex: '(?:https?|ftp)://(?:[^/@]*@)?(?:\d{1,4}\.\d{1,4}\.\d{1,4}\.\d{1,4}|0x[0-9a-f]{1,8}|\d{8,10}|0\d{3,11}|localhost|169\.254\.169\.254|metadata\.google\.internal|\[::1\]|\[::ffff:[0-9a-f.:]+\])(?::\d+)?(?:[/?#]|$)'
+    tags: [OWASP_A10, rfi, ssrf]
+
+  - id: wf-931-110
+    set: rfi
+    phase: head
+    msg: "file://, gopher:// or dict:// scheme in a parameter"
+    severity: critical
+    targets: [args, cookies, path_raw]
+    transform: [url_decode, remove_nulls, lowercase, compress_whitespace]
+    operator: { contains_any: ['file://', 'gopher://', 'dict://'] }
+    tags: [OWASP_A10, rfi, ssrf]

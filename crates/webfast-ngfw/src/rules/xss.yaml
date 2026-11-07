@@ -1,0 +1,65 @@
+# Set `xss` (wf-941-*): cross-site scripting. Script and embedding tags, script schemes, event
+# handler attributes, the DOM and functions a payload reaches for. On parameter values, cookies
+# and the body, after `url_decode html_decode js_decode remove_nulls lowercase compress_whitespace`.
+# OWASP: A03 Injection.
+rules:
+  - id: wf-941-100
+    set: xss
+    phase: head
+    msg: "HTML tag that runs or embeds script (script, svg, iframe, object, embed, meta http-equiv)"
+    severity: critical
+    targets: [args, cookies, body]
+    transform: [url_decode, html_decode, js_decode, remove_nulls, lowercase, compress_whitespace]
+    operator:
+      contains_any: ['<script', '</script', '<svg', '<iframe', '<object', '<embed', '<meta http-equiv',
+                     '<img src=x onerror']
+    tags: [OWASP_A03, injection, xss]
+
+  - id: wf-941-110
+    set: xss
+    phase: head
+    msg: "Script scheme (javascript:, vbscript:, data:text/html)"
+    severity: critical
+    targets: [args, cookies, body]
+    transform: [url_decode, html_decode, js_decode, remove_nulls, lowercase, compress_whitespace]
+    operator: { contains_any: ['javascript:', 'vbscript:', 'data:text/html'] }
+    tags: [OWASP_A03, injection, xss]
+
+  - id: wf-941-120
+    set: xss
+    phase: head
+    msg: "Event handler attribute (onload=, onerror=, onmouseover=, ...)"
+    severity: high
+    targets: [args, cookies, body]
+    transform: [url_decode, html_decode, js_decode, remove_nulls, lowercase, compress_whitespace]
+    prefilter: [onload, onerror, onmouseover, onmouseout, onmouseenter, onmouseleave, onmousedown,
+                onmouseup, onfocus, onblur, onclick, ondblclick, onkeydown, onkeyup, onkeypress,
+                onsubmit, onchange, oninput, onanimationstart, onanimationend, ontransitionend,
+                ontoggle, onpointerover, onpointerenter, onpointerdown, onwheel, onscroll,
+                onresize, onpageshow, onbeforeunload, onunload, onabort, onreadystatechange,
+                onmessage, onhashchange, onplay, onpause, onended, onbegin, ondrag, ondrop,
+                oncut, oncopy, onpaste, onselect, oncontextmenu, onauxclick, onloadstart]
+    operator:
+      regex: '(?:^|[^a-z0-9_])on(?:load|error|mouseover|mouseout|mouseenter|mouseleave|mousedown|mouseup|focus|blur|click|dblclick|keydown|keyup|keypress|submit|change|input|animationstart|animationend|transitionend|toggle|pointerover|pointerenter|pointerdown|wheel|scroll|resize|pageshow|beforeunload|unload|abort|readystatechange|message|hashchange|play|pause|ended|begin|drag|drop|cut|copy|paste|select|contextmenu|auxclick|loadstart)\s*='
+    tags: [OWASP_A03, injection, xss]
+
+  - id: wf-941-130
+    set: xss
+    phase: head
+    msg: "Script payload reaching for the document, the location or an encoder"
+    severity: high
+    targets: [args, cookies, body]
+    transform: [url_decode, html_decode, js_decode, remove_nulls, lowercase, compress_whitespace]
+    operator:
+      contains_any: ['document.cookie', 'document.location', 'window.location', 'string.fromcharcode', 'expression(']
+    tags: [OWASP_A03, injection, xss]
+
+  - id: wf-941-140
+    set: xss
+    phase: head
+    msg: "eval( or alert( in a parameter"
+    severity: medium
+    targets: [args, cookies, body]
+    transform: [url_decode, html_decode, js_decode, remove_nulls, lowercase, compress_whitespace]
+    operator: { contains_any: ['eval(', 'alert('] }
+    tags: [OWASP_A03, injection, xss]

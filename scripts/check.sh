@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# The checks CI runs (.github/workflows/ci.yml), here in Docker — the host needs nothing else:
+#
+#   scripts/check.sh [fmt] [clippy] [test] [msrv] [deny]     (none named: all)
+#
+# fmt: rustfmt; clippy: lints on both crates of the workspace, warnings are errors (also without the
+# default features per crate: the filter without the challenge); test: unit and end-to-end tests on
+# stable Rust; msrv: the tests on the workspace's rust-version (Cargo.toml); deny: cargo-deny
+# (advisories, licenses, bans, sources). The crate cache, the git checkouts (the core comes from
+# webfast's repository), build directories and tools stay in Docker volumes (webfast-modules-cargo,
+# webfast-modules-git, webfast-modules-target, webfast-modules-tools). RUST_IMAGE
+# (rust:1-slim-bookworm), CARGO_DENY_VERSION (the one CI installs).
+#
+# Inside the container there is no webfast checkout next to the project: Cargo.toml's [patch] for
+# one is not in effect, as it is not in CI.
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+image=${RUST_IMAGE:-rust:1-slim-bookworm}
+msrv=$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' "$root/Cargo.toml")
+deny_version=${CARGO_DENY_VERSION:-0.20.2}
+checks=("$@")
+[ ${#checks[@]} -gt 0 ] || checks=(fmt clippy test msrv deny)
+
+# run <image> <build directory> <command>: in /src, the project read-only.
+run() {
+  docker run --rm --network host \
+    -v webfast-modules-cargo:/usr/local/cargo/registry -v webfast-modules-git:/usr/local/cargo/git \
+    -v webfast-modules-target:/target -v webfast-modules-tools:/tools \
+    -e CARGO_TARGET_DIR="/target/$2" -e CARGO_INSTALL_ROOT=/tools -e CARGO_TERM_COLOR=always \
+    -v "$root:/src:ro" -w /src "$1" sh -c "export PATH=/tools/bin:\$PATH; $3"
+}
+
+failed=()
+for check in "${checks[@]}"; do
+  echo "== $check"
+  case $check in
+    fmt) command="rustup component add rustfmt >/dev/null 2>&1 && cargo fmt --all --check" ;;
+    clippy) command="rustup component add clippy >/dev/null 2>&1 && cargo clippy --locked --workspace --all-targets -- -D warnings && cargo clippy --locked -p webfast-ngfw --all-targets --no-default-features -- -D warnings && cargo clippy --locked -p webfast-challenge --all-targets --no-default-features -- -D warnings" ;;
+    test) command="cargo test --locked --workspace" ;;
+    msrv) command="cargo test --locked --workspace" ;;
+    deny) command="command -v cargo-deny >/dev/null || cargo install --locked cargo-deny --version $deny_version; cargo deny check" ;;
+    *)
+      echo "unknown check $check (fmt, clippy, test, msrv, deny)" >&2
+      exit 2
+      ;;
+  esac
+  if [ "$check" = msrv ]; then
+    run "rust:$msrv-slim-bookworm" msrv "$command" || failed+=("$check")
+  elif [ "$check" = deny ]; then
+    # The full image: cargo-deny fetches the advisory database with git.
+    run "${image/-slim/}" stable "$command" || failed+=("$check")
+  else
+    run "$image" stable "$command" || failed+=("$check")
+  fi
+done
+
+if [ ${#failed[@]} -gt 0 ]; then
+  echo "failed: ${failed[*]}"
+  exit 1
+fi
+echo "all passed: ${checks[*]}"

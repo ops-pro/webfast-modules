@@ -1,0 +1,81 @@
+# Set `sqli` (wf-942-*): SQL injection. Statements and keywords no form value needs, the
+# time-based and file functions, tautologies, comment and quote tricks, stacked statements. On
+# parameter values and cookies, after `url_decode remove_nulls lowercase remove_comments
+# compress_whitespace` (wf-942-140 keeps the comments to see them).
+# OWASP: A03 Injection.
+rules:
+  - id: wf-942-100
+    set: sqli
+    phase: head
+    msg: "SQL statement in a parameter (union select, insert into, drop table, into outfile)"
+    severity: critical
+    targets: [args, cookies, body]
+    transform: [url_decode, remove_nulls, lowercase, remove_comments, compress_whitespace]
+    operator: { contains_any: ['union select', 'union all select', 'insert into', 'drop table', 'into outfile'] }
+    tags: [OWASP_A03, injection, sqli]
+
+  - id: wf-942-110
+    set: sqli
+    phase: head
+    msg: "select ... from in a parameter"
+    severity: high
+    targets: [args, cookies, body]
+    transform: [url_decode, remove_nulls, lowercase, remove_comments, compress_whitespace]
+    prefilter: ['select ']
+    operator: { regex: '(?:^|[^a-z0-9_])select .{1,200}?(?:^|[^a-z0-9_])from(?:[^a-z0-9_]|$)' }
+    tags: [OWASP_A03, injection, sqli]
+
+  - id: wf-942-120
+    set: sqli
+    phase: head
+    msg: "SQL function for timing, files or the system (sleep, benchmark, load_file, xp_cmdshell)"
+    severity: critical
+    targets: [args, cookies, body]
+    transform: [url_decode, remove_nulls, lowercase, remove_comments, compress_whitespace]
+    operator:
+      contains_any: ['sleep(', 'benchmark(', 'pg_sleep(', 'waitfor delay', 'information_schema',
+                     'load_file(', 'xp_cmdshell', '@@version']
+    tags: [OWASP_A03, injection, sqli]
+
+  - id: wf-942-130
+    set: sqli
+    phase: head
+    msg: "SQL tautology (' or ', or 1=1, and 1=1)"
+    severity: high
+    targets: [args, cookies, body]
+    transform: [url_decode, remove_nulls, lowercase, remove_comments, compress_whitespace]
+    operator: { contains_any: ["' or '", '" or "', 'or 1=1', 'and 1=1', "' or 1", '" or 1'] }
+    tags: [OWASP_A03, injection, sqli]
+
+  - id: wf-942-140
+    set: sqli
+    phase: head
+    msg: "SQL comment after a quote or a semicolon, or a MySQL version comment (/*!)"
+    severity: high
+    targets: [args, cookies, body]
+    transform: [url_decode, remove_nulls, lowercase, compress_whitespace]
+    operator: { contains_any: ["'--", '"--', "' --", '" --', ';--', '; --', '/*!'] }
+    tags: [OWASP_A03, injection, sqli]
+
+  - id: wf-942-150
+    set: sqli
+    phase: head
+    msg: "char() or concat() with a quote, or a hex literal with a quote"
+    severity: medium
+    targets: [args, cookies, body]
+    transform: [url_decode, remove_nulls, lowercase, remove_comments, compress_whitespace]
+    prefilter: ['char(', 'concat(', '0x']
+    operator:
+      regex: '(?:[''"].{0,40}?(?:^|[^a-z0-9_])(?:char|concat)\(|(?:^|[^a-z0-9_])(?:char|concat)\(.{0,40}?[''"]|[''"].{0,20}?0x[0-9a-f]{8}|0x[0-9a-f]{8}.{0,20}?[''"])'
+    tags: [OWASP_A03, injection, sqli]
+
+  - id: wf-942-160
+    set: sqli
+    phase: head
+    msg: "Stacked SQL statement (; drop, ; delete, ; update, ; insert)"
+    severity: high
+    targets: [args, cookies, body]
+    transform: [url_decode, remove_nulls, lowercase, remove_comments, compress_whitespace]
+    prefilter: [';']
+    operator: { regex: ';\s*(?:drop|delete|update|insert)(?:[^a-z0-9_]|$)' }
+    tags: [OWASP_A03, injection, sqli]

@@ -1,0 +1,52 @@
+[workspace]
+resolver = "2"
+members = ["crates/webfast-ngfw", "crates/webfast-challenge"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+# The same minimum as webfast-core's (let chains: 1.88; serde-saphyr: 1.89).
+rust-version = "1.89"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ops-pro/webfast-modules"
+publish = false
+
+# The versions every crate of the workspace uses (a crate names what it needs with
+# `workspace = true`), pinned as webfast's own workspace pins them; the comments on why a crate is
+# there are in the crates' Cargo.toml files.
+[workspace.dependencies]
+# The core: the module API, the body type, the Caddyfile and the test harness
+# (https://github.com/ops-pro/webfast/blob/main/docs/modules.md). The modules follow its dev-ci branch
+# as webfast's binary follows theirs; a release of webfast pins a tag of this repository.
+webfast-core = { git = "https://github.com/ops-pro/webfast", branch = "dev-ci", version = "0.1", default-features = false }
+ahash = "0.8"
+aho-corasick = "1"
+anyhow = "1"
+arc-swap = "1"
+aws-lc-rs = { version = "1", default-features = false, features = ["aws-lc-sys", "prebuilt-nasm"] }
+blake3 = "1"
+bytes = "1"
+http = "1"
+http-body = "1"
+http-body-util = "0.1"
+hyper = { version = "1", features = ["http1", "http2", "server", "client"] }
+hyper-util = { version = "0.1", features = ["tokio", "server", "server-auto", "server-graceful", "client-legacy", "http1", "http2"] }
+ipnet = "2"
+maxminddb = "0.27"
+memchr = "2"
+percent-encoding = "2"
+regex = "1"
+rustc-hash = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time", "io-util"] }
+tokio-stream = "0.1"
+tracing = "0.1"
+
+[profile.release]
+# As webfast's: one codegen unit and whole-program LTO. The binary that carries the modules is
+# built in webfast's workspace with its profile; this one is for `cargo build --release` here.
+codegen-units = 1
+lto = "fat"
+strip = "symbols"

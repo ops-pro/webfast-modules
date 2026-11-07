@@ -1,0 +1,38 @@
+# Set `template` (wf-944-*): server-side template injection and expression language injection.
+# Template delimiters with a call inside, the Python and Java names a payload climbs through,
+# Velocity and FreeMarker, and `${jndi:` (Log4Shell), which blocks at once wherever it appears.
+# OWASP: A03 Injection.
+rules:
+  - id: wf-944-100
+    set: template
+    phase: head
+    msg: "Template expression with a call inside ({{ ( }}, ${ ( }, #{ ( }, <% ( %>)"
+    severity: high
+    targets: [args, cookies, body]
+    transform: [url_decode, remove_nulls, lowercase, compress_whitespace]
+    prefilter: ['{{', '${', '#{', '<%']
+    operator: { regex: '(?:\{\{|\$\{|#\{|<%)[^}%]{0,200}?\(' }
+    tags: [OWASP_A03, injection, ssti]
+
+  - id: wf-944-110
+    set: template
+    phase: head
+    msg: "Template engine internals (__class__, __globals__, mro(), lipsum, T(java.lang, freemarker, #set()"
+    severity: critical
+    targets: [args, cookies, body]
+    transform: [url_decode, remove_nulls, lowercase, compress_whitespace]
+    operator:
+      contains_any: ['__class__', '__globals__', '__import__', '__subclasses__', 'mro(', 'lipsum.',
+                     'cycler.', 'joiner.', 't(java.lang', 'freemarker', '#set(']
+    tags: [OWASP_A03, injection, ssti]
+
+  - id: wf-944-120
+    set: template
+    phase: head
+    msg: "JNDI lookup (${jndi:) in a parameter, header or the path"
+    severity: critical
+    targets: [args, cookies, headers, path_raw, body]
+    transform: [url_decode, remove_nulls, lowercase, compress_whitespace]
+    operator: { contains_any: ['${jndi:'] }
+    action: block
+    tags: [OWASP_A03, injection, jndi, log4shell]

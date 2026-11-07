@@ -1,0 +1,6 @@
+# Local development next to a webfast checkout (../webfast): copy this file to .cargo/config.toml
+# (ignored by git) and the core is built from disk in place of the git source in Cargo.toml, so a
+# change in the core's API is built against before it is pushed. Cargo.lock then records the core
+# without a source; do not commit that lock.
+[patch."https://github.com/ops-pro/webfast"]
+webfast-core = { path = "../webfast/crates/webfast-core" }

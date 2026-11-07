@@ -1,0 +1,88 @@
+# Set `leakage` (wf-950-*, the `response` phase): what an upstream should not tell the client.
+# In the first bytes of a 200 or 5xx response: PHP errors and stack traces, Java and Python
+# tracebacks, database error messages, directory listings. A match replaces the response by
+# `response.leak_status` through the site's `handle_errors`. The Server header with a full version
+# is noted (`log`), not refused; X-Powered-By is not a leak (sites set it on purpose).
+# OWASP: A05 Security Misconfiguration (verbose errors). The literals are case-sensitive: these
+# messages are written by the runtimes, not by people.
+rules:
+  - id: wf-950-100
+    set: leakage
+    phase: response
+    msg: "PHP error or exception text in the response"
+    severity: critical
+    targets: [response.body]
+    transform: []
+    operator: { contains_any: ['Fatal error:', 'Parse error:', 'Stack trace:', 'Uncaught Exception', 'Uncaught Error'] }
+    action: block
+    tags: [OWASP_A05, leakage, php]
+
+  - id: wf-950-110
+    set: leakage
+    phase: response
+    msg: "PHP warning with the file and line in the response"
+    severity: high
+    targets: [response.body]
+    transform: []
+    prefilter: ['Warning:']
+    operator: { regex: 'Warning:.{1,300}? on line \d+' }
+    action: block
+    tags: [OWASP_A05, leakage, php]
+
+  - id: wf-950-120
+    set: leakage
+    phase: response
+    msg: "Java or Python stack trace in the response"
+    severity: high
+    targets: [response.body]
+    transform: []
+    operator: { contains_any: ['at java.', 'Traceback (most recent call last)'] }
+    action: block
+    tags: [OWASP_A05, leakage, trace]
+
+  - id: wf-950-130
+    set: leakage
+    phase: response
+    msg: "Database error message in the response"
+    severity: critical
+    targets: [response.body]
+    transform: []
+    operator: { contains_any: ['SQLSTATE[', 'You have an error in your SQL syntax', 'Microsoft OLE DB', 'ODBC Driver'] }
+    action: block
+    tags: [OWASP_A05, leakage, sql]
+
+  - id: wf-950-140
+    set: leakage
+    phase: response
+    msg: "Oracle error code (ORA-nnnnn) in the response"
+    severity: critical
+    targets: [response.body]
+    transform: []
+    prefilter: ['ORA-']
+    operator: { regex: 'ORA-\d{5}' }
+    action: block
+    tags: [OWASP_A05, leakage, sql]
+
+  - id: wf-950-150
+    set: leakage
+    phase: response
+    msg: "Directory listing in the response"
+    severity: high
+    targets: [response.body]
+    transform: []
+    operator: { contains_any: ['<title>Index of /', 'Directory listing for'] }
+    action: block
+    tags: [OWASP_A05, leakage, listing]
+
+  - id: wf-950-900
+    set: leakage
+    phase: response
+    msg: "Server header with a full version"
+    severity: notice
+    score: 0
+    targets: [response.headers.server]
+    transform: []
+    prefilter: ['/']
+    operator: { regex: '^(?:Apache|nginx|Microsoft-IIS|lighttpd|LiteSpeed|Jetty|Apache-Coyote|openresty|gunicorn|uvicorn|Werkzeug|Kestrel)/\d+\.\d+' }
+    action: log
+    tags: [OWASP_A05, leakage, server]

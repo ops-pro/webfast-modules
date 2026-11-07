@@ -1,0 +1,217 @@
+# Set `protocol` (wf-920-*): protocol anomalies. Methods outside the usual seven, HTTP/1.0
+# without Host, control and non-UTF-8 bytes, nulls, double encoding, `..` that survives
+# normalization, oversized paths, queries, cookies and headers, too many parameters or cookies,
+# conflicting framing headers, a declared body type the bytes contradict, a POST without a
+# Content-Type, missing User-Agent and Accept, a Range with too many parts, JSON nested too deep.
+# OWASP: A05 Security Misconfiguration (requests no honest client sends). The `anomaly.*`
+# targets are facts the parser records while reading the request (docs/ngfw.md, Targets).
+rules:
+  - id: wf-920-100
+    set: protocol
+    phase: head
+    msg: "Method not in GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS"
+    severity: medium
+    targets: [method]
+    transform: []
+    # The complement of the seven, since the regex syntax has no negative look-ahead. No
+    # prefilter: there is no literal to gate on, and the method is a few bytes.
+    operator:
+      regex: '^(?:[^GHPDO]|G(?:[^E]|$)|GE(?:[^T]|$)|GET.|H(?:[^E]|$)|HE(?:[^A]|$)|HEA(?:[^D]|$)|HEAD.|P(?:[^OUA]|$)|PO(?:[^S]|$)|POS(?:[^T]|$)|POST.|PU(?:[^T]|$)|PUT.|PA(?:[^T]|$)|PAT(?:[^C]|$)|PATC(?:[^H]|$)|PATCH.|D(?:[^E]|$)|DE(?:[^L]|$)|DEL(?:[^E]|$)|DELE(?:[^T]|$)|DELET(?:[^E]|$)|DELETE.|O(?:[^P]|$)|OP(?:[^T]|$)|OPT(?:[^I]|$)|OPTI(?:[^O]|$)|OPTIO(?:[^N]|$)|OPTION(?:[^S]|$)|OPTIONS.)'
+    tags: [OWASP_A05, protocol, method]
+
+  - id: wf-920-110
+    set: protocol
+    phase: head
+    msg: "HTTP/1.0 request without a Host header"
+    severity: medium
+    targets: [anomaly.http10_without_host]
+    transform: []
+    operator: exists
+    tags: [OWASP_A05, protocol, host]
+
+  - id: wf-920-120
+    set: protocol
+    phase: head
+    msg: "Control character in the path or a header"
+    severity: high
+    targets: [path_raw, headers]
+    transform: []
+    operator:
+      contains_any:
+        ["\x00", "\x01", "\x02", "\x03", "\x04", "\x05", "\x06", "\x07", "\x08",
+         "\x0b", "\x0c", "\x0e", "\x0f", "\x10", "\x11", "\x12", "\x13", "\x14",
+         "\x15", "\x16", "\x17", "\x18", "\x19", "\x1a", "\x1b", "\x1c", "\x1d",
+         "\x1e", "\x1f", "\x7f"]
+    tags: [OWASP_A05, protocol, encoding]
+
+  - id: wf-920-130
+    set: protocol
+    phase: head
+    msg: "Byte sequence that is not UTF-8 in the path or a header"
+    severity: medium
+    targets: [path_raw, headers]
+    transform: [url_decode]
+    operator: not_valid_utf8
+    tags: [OWASP_A05, protocol, encoding]
+
+  - id: wf-920-140
+    set: protocol
+    phase: head
+    msg: "Null byte (%00) in the path or query"
+    severity: high
+    targets: [path_raw, query]
+    transform: []
+    operator: { contains_any: ['%00'] }
+    tags: [OWASP_A05, protocol, encoding]
+
+  - id: wf-920-150
+    set: protocol
+    phase: head
+    msg: "Double URL encoding"
+    severity: medium
+    targets: [anomaly.double_encoding]
+    transform: []
+    operator: exists
+    tags: [OWASP_A05, protocol, encoding]
+
+  - id: wf-920-160
+    set: protocol
+    phase: head
+    msg: "Path with `..` left after normalization"
+    severity: medium
+    targets: [path_raw]
+    transform: [url_decode, normalize_path, remove_nulls, lowercase]
+    operator: { contains_any: ['..'] }
+    tags: [OWASP_A05, protocol, path]
+
+  - id: wf-920-170
+    set: protocol
+    phase: head
+    msg: "Two Content-Length headers, or Content-Length with Transfer-Encoding"
+    severity: critical
+    targets: [anomaly.duplicate_content_length]
+    transform: []
+    operator: exists
+    action: block
+    tags: [OWASP_A05, protocol, smuggling]
+
+  - id: wf-920-180
+    set: protocol
+    phase: head
+    msg: "Path over 2048 bytes"
+    severity: medium
+    targets: [path_raw]
+    transform: []
+    operator: { length_gt: 2048 }
+    tags: [OWASP_A05, protocol, size]
+
+  - id: wf-920-190
+    set: protocol
+    phase: head
+    msg: "Query string over 8192 bytes"
+    severity: medium
+    targets: [query]
+    transform: []
+    operator: { length_gt: 8192 }
+    tags: [OWASP_A05, protocol, size]
+
+  - id: wf-920-200
+    set: protocol
+    phase: head
+    msg: "Cookie value over 8192 bytes"
+    severity: medium
+    targets: [cookies]
+    transform: []
+    operator: { length_gt: 8192 }
+    tags: [OWASP_A05, protocol, size]
+
+  - id: wf-920-210
+    set: protocol
+    phase: head
+    msg: "Header value over 8192 bytes"
+    severity: medium
+    targets: [headers]
+    transform: []
+    operator: { length_gt: 8192 }
+    tags: [OWASP_A05, protocol, size]
+
+  - id: wf-920-220
+    set: protocol
+    phase: head
+    msg: "More than 128 parameters"
+    severity: medium
+    targets: [args_count]
+    transform: []
+    operator: { gt: 128 }
+    tags: [OWASP_A05, protocol, size]
+
+  - id: wf-920-230
+    set: protocol
+    phase: head
+    msg: "More than 64 cookies"
+    severity: medium
+    targets: [cookies]
+    transform: []
+    operator: { count_gt: 64 }
+    tags: [OWASP_A05, protocol, size]
+
+  - id: wf-920-300
+    set: protocol
+    phase: head
+    msg: "No User-Agent header"
+    severity: notice
+    targets: [ua]
+    transform: []
+    operator: missing
+    tags: [OWASP_A05, protocol, headers]
+
+  - id: wf-920-310
+    set: protocol
+    phase: head
+    msg: "No Accept header"
+    severity: notice
+    targets: [headers.accept]
+    transform: []
+    operator: missing
+    tags: [OWASP_A05, protocol, headers]
+
+  - id: wf-920-400
+    set: protocol
+    phase: body
+    msg: "Body does not match its declared Content-Type (JSON declared, not JSON)"
+    severity: medium
+    targets: [anomaly.body_type_mismatch]
+    transform: []
+    operator: exists
+    tags: [OWASP_A05, protocol, body]
+
+  - id: wf-920-410
+    set: protocol
+    phase: head
+    msg: "POST without a Content-Type"
+    severity: medium
+    targets: [anomaly.post_without_content_type]
+    transform: []
+    operator: exists
+    tags: [OWASP_A05, protocol, body]
+
+  - id: wf-920-440
+    set: protocol
+    phase: head
+    msg: "Range header with more than 16 parts"
+    severity: medium
+    targets: [headers.range]
+    transform: [compress_whitespace]
+    prefilter: [',']
+    operator: { regex: '(?:,[^,]*){16}' }
+    tags: [OWASP_A05, protocol, range]
+
+  - id: wf-920-520
+    set: protocol
+    phase: body
+    msg: "JSON body nested deeper than json_max_depth"
+    severity: medium
+    targets: [anomaly.json_depth]
+    transform: []
+    operator: exists
+    tags: [OWASP_A05, protocol, body]

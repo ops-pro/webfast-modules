@@ -1,0 +1,36 @@
+# Set `traversal` (wf-930-*): path traversal and local file inclusion. `../` and `..\` in any
+# encoding, the files every traversal payload reaches for (/etc/passwd, win.ini, boot.ini),
+# `php://filter` and the `.../` sequence.
+# OWASP: A01 Broken Access Control.
+rules:
+  - id: wf-930-100
+    set: traversal
+    phase: head
+    msg: "Directory traversal sequence (../ or ..\\) in the path, query or a cookie"
+    severity: high
+    targets: [path_raw, query, args, cookies]
+    transform: [url_decode, remove_nulls, lowercase, compress_whitespace]
+    operator: { contains_any: ['../', '..\', '/..', '..;/'] }
+    tags: [OWASP_A01, traversal, lfi]
+
+  - id: wf-930-110
+    set: traversal
+    phase: head
+    msg: "Operating system file in a parameter or the path"
+    severity: critical
+    targets: [args, path, cookies]
+    transform: [url_decode, normalize_path, remove_nulls, lowercase]
+    operator:
+      contains_any: ['/etc/passwd', '/etc/shadow', '/proc/self', '/windows/win.ini',
+                     'c:/windows', 'c:\windows', 'boot.ini']
+    tags: [OWASP_A01, traversal, lfi]
+
+  - id: wf-930-120
+    set: traversal
+    phase: head
+    msg: "php://filter wrapper or .../ sequence"
+    severity: high
+    targets: [args, path_raw, cookies]
+    transform: [url_decode, remove_nulls, lowercase, compress_whitespace]
+    operator: { contains_any: ['php://filter', '.../'] }
+    tags: [OWASP_A01, traversal, lfi, php]

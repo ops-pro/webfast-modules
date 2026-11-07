@@ -1,0 +1,41 @@
+[package]
+name = "webfast-challenge"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "The browser challenge of webfast: the `challenge` directive and the answer endpoint; a client proves it is a browser (a cookie, a script, a proof-of-work, a CAPTCHA) and carries a signed cookie; a module on webfast-core's module API"
+readme = "../../README.md"
+keywords = ["http", "web-server", "challenge", "caddyfile"]
+categories = ["web-programming::http-server"]
+
+[lib]
+name = "webfast_challenge"
+path = "src/lib.rs"
+
+[dependencies]
+# The core, with its HTTPS client: the CAPTCHA providers' siteverify (src/captcha.rs).
+webfast-core = { workspace = true, features = ["fetch"] }
+# The cookies' keyed hashes (src/token.rs).
+blake3.workspace = true
+# SHA-256 of the proof-of-work and of the page (src/pow.rs, src/page.rs); HKDF for the keys
+# (src/token.rs). Already the TLS backend of the core.
+aws-lc-rs.workspace = true
+# The hasher of the defer cells and the table of passed cookies.
+ahash.workspace = true
+anyhow.workspace = true
+arc-swap.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+percent-encoding.workspace = true
+rustc-hash.workspace = true
+# The CAPTCHA providers' answers (src/captcha.rs).
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+# The harness: a server from a Caddyfile text, raw HTTP/1.1 to it (crates/webfast-core/src/harness.rs).
+webfast-core = { workspace = true, features = ["test-harness"] }
