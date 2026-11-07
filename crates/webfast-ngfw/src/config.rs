@@ -64,6 +64,11 @@ pub struct ResponseConfig {
     /// What a response the `response` phase refuses is replaced by.
     #[serde(default = "server_error")]
     pub leak_status: u16,
+    /// A 200 goes out at once and its body is scanned as it streams, cut on a leak (`true`, the
+    /// default); `false`: held until `body.max_inspect` bytes are in, and replaced on a leak, as a
+    /// 5xx always is.
+    #[serde(default = "yes")]
+    pub stream: bool,
     /// The browser challenge's level where one is asked (`action: challenge`, `mode: challenge`,
     /// `access.*.challenge`, `ban.then: challenge`): `cookie | js | pow | captcha` (default `js`).
     pub challenge: Option<String>,
@@ -112,6 +117,7 @@ impl Default for ResponseConfig {
         ResponseConfig {
             status: forbidden(),
             leak_status: server_error(),
+            stream: true,
             challenge: None,
             captcha: None,
             challenge_valid: None,
@@ -136,6 +142,10 @@ fn forbidden() -> u16 {
 
 fn server_error() -> u16 {
     500
+}
+
+fn yes() -> bool {
+    true
 }
 
 #[derive(Deserialize, Debug, Default)]

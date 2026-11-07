@@ -56,6 +56,8 @@ threshold: 5                      # the sum of scores from which a request is re
 response:
   status: 403                     # 403 | 404 | 444 (444: the connection is closed, nothing sent)
   leak_status: 500                # what a response the `response` phase refuses is replaced by
+  stream: true                    # a 200 goes out at once, scanned as it streams and cut on a leak;
+                                  # false: held until max_inspect and replaced, as a 5xx always is
   challenge: js                   # the browser challenge's level where one is asked: cookie | js | pow | captcha
   challenge_valid: 7d             # how long a passed client is not asked again
   challenge_bind: ip              # ip | none: the cookie bound to the client's /24 or /48
@@ -157,7 +159,7 @@ country header, say).
 | `head`       | method, version, path, query, headers, cookies, User-Agent, host      | every request                             |
 | `body`       | the body up to `max_inspect`, parsed by type: form, JSON, XML as text | a body of a listed type                   |
 | `upload`     | each part of a multipart body with a `filename`                       | multipart bodies                          |
-| `response`   | a proxied response: status, headers, the body's start                 | proxied responses, rules in the set       |
+| `response`   | a proxied response: status, headers, the body's start (a 200 as it streams) | proxied responses, rules in the set |
 
 Decision per request: `access.ip.allow` lets the request through everything; a ban, `deny`, a
 denied country or ASN, a honeypot refuses at once; a `ban.then: challenge` mark, a country or ASN
@@ -355,8 +357,10 @@ Every rule has `msg`, `severity`, `tags` with the OWASP category.
   `at java.`, `Traceback (most recent call last)`, `ORA-\d{5}`, `SQLSTATE[`, `You have an error in
   your SQL syntax`, `Microsoft OLE DB`, `ODBC Driver`, `<title>Index of /`, `Directory listing
   for`; `X-Powered-By` is not a leak (sites set it on purpose), but `wf-950-900` (`log`) notes
-  `Server: Apache/2.4.x` with a full version. A match replaces the response by `leak_status`
-  through `handle_errors`, body dropped, and is written to the log with the matched text.
+  `Server: Apache/2.4.x` with a full version. A match in a 5xx (or in a 200's headers, or in a 200
+  with `response.stream: false`) replaces the response by `leak_status` through `handle_errors`,
+  body dropped; a match in a streamed 200's body cuts the response before the frame that has it
+  (see "Response phase"). Either is written to the log as `leak` with the matched text.
 
 Each rule has a stable id; a site that needs a rule the sets do not have writes it in its own
 file; a rule that a new vulnerability calls for is added to the set that fits and reaches sites
@@ -406,10 +410,14 @@ access log as any other.
   to the handler as a `Body::full` followed by the rest of the stream, so nothing is read twice.
   Multipart is parsed from the inspected prefix in one pass of the module's own (a truncated last
   part is fine: only names, types and heads are looked at).
-- The response phase holds a covered response (200/5xx, text, JSON or XHTML) until `max_inspect`
-  bytes of its body have arrived before the first byte goes to the client: for an 8 KiB page
-  that is 5–10 µs of waiting and a copy, plus the scan. A site that does not want it disables
-  the set (`disable: [wf-950-*]`) or lowers `body.max_inspect`.
+- The response phase does not hold a covered 200 (text, JSON or XHTML): its head goes out at
+  once and its frames as they come, each scanned in passing (the automaton over the frame and
+  over a window across each frame boundary; nothing allocated per frame). A 5xx, and a 200 with
+  `response.stream: false`, is held until `max_inspect` bytes of its body have arrived before the
+  first byte goes to the client (5–10 µs of waiting and a copy for an 8 KiB page, plus the scan).
+  Measured in process on one core (the bench's POSTs to a proxied 8 KiB page, the filter on less
+  off, best of three): streaming took 2.7 µs off a 1 KiB form and 5.0 µs off a 4 KiB upload. A
+  site that wants neither disables the set (`disable: [wf-950-*]`) or lowers `body.max_inspect`.
 - Geo lookups: `maxminddb` over a memory-mapped or read file, ~100 ns, two per request when both
   databases are configured.
 - Address lists: two prefix tries (v4, v6) under `ArcSwap`, replaced whole on reload.
@@ -518,23 +526,51 @@ Durations in the configs are strings (`10m`, `1h`, `24h`, `30s`, `2d`) parsed by
 ### Response phase
 
 `NgfwResponses` implements the core's `module::Inspect` (`covers` is a plain call on the response's
-status and headers; `inspect` runs only for a response it covers):
+status and headers; `inspect` runs only for a response it covers, in the one future the core boxes
+for the set's inspectors):
 
 ```rust
 /// The response as the upstream gave it: may read the start of the body (giving back a body
-/// that yields the same bytes) and replace the response.
+/// that yields the same bytes), wrap the body, or replace the response.
 fn inspect<'a>(&'a self, ctx: &'a mut Ctx, parts: &'a mut http::response::Parts, body: Body)
-    -> BoxFuture<'a, Result<Body, Response<Body>>>;
+    -> impl Future<Output = Result<Body, Response<Body>>> + Send + 'a;
 ```
 
 The core calls the composed inspectors in order before the proxy cache keeps the response;
 `Err(response)` is sent in the response's place (marked `ErrorPage`, so `handle_errors` applies).
 It is zero-sized and finds the loaded module among the composed checks by its type
-(`ctx.hook::<Ngfw>()`). The NGFW inspector reads at most
-`body.max_inspect` bytes of a response whose status and Content-Type the leakage rules cover
-(`text/*`, `application/json`, `application/xhtml+xml`), runs the `response` rules, and gives back
-`Body::full(prefix)` chained with the rest. Responses that no rule covers (an image, a 304) are not
-read.
+(`ctx.hook::<Ngfw>()`). It looks at a response whose status and Content-Type the leakage rules
+cover (200 or 5xx; `text/*`, `application/json`, `application/xhtml+xml`); responses that no rule
+covers (an image, a 304) are not read. Of the body, at most `body.max_inspect` bytes are scanned.
+
+- **5xx** (and a 200 with `response.stream: false`): held. The body is read up to `max_inspect`
+  bytes, the `response` rules run over the status, the headers and that text, and the response
+  goes on as the same frames followed by the rest — or, on a hit, is replaced by `leak_status`
+  through the site's `handle_errors` (its headers dropped too). Error pages are short, and are
+  where leaks are.
+- **200** (`response.stream: true`, the default): streamed. The status and header rules run first,
+  before any byte goes out; a hit there replaces the whole response as above. The body is then
+  wrapped in a scanning body: every data frame is scanned as it passes, until `max_inspect` bytes
+  were, and frames after that pass untouched.
+  - The `response.body` rules' automaton runs over the frame, and over a window across the
+    boundary before it: the last `carry` bytes of the body before the boundary and as many of the
+    frame after it. `carry` is the longest `response.body` literal less one, and 512 bytes
+    (`WINDOW`) when a body rule is a regex or another per-value test (the built-in wf-950-110 and
+    -140 are), at most 1024. So a literal cut between frames is found, and a regex whose
+    prefilter literal was found is tested on the whole frame and on up to 512 bytes either side
+    of each boundary: a match of up to 512 bytes is found however the frames are cut (`^` and `$`
+    then mean the edges of that window). The window lives in a buffer inline in the scanning
+    body; nothing is allocated per frame (a frame that is not UTF-8 is made text in one string
+    reused for the response).
+  - On a hit (`block`, `ban`, `challenge`) the frame that has it is not forwarded: the body ends
+    with an error and the server gives up on the response — HTTP/1.1 closes the connection (a
+    head and frames not yet flushed are not sent either), HTTP/2 resets the stream (`RST_STREAM`
+    `INTERNAL_ERROR`; the connection's other streams go on), HTTP/3 stops the stream
+    (`H3_REQUEST_CANCELLED`) — so the client never has a whole response, and the proxy cache does
+    not keep it. The event is written as `leak` ("response cut", `status` the response's own),
+    with the matched text and the header rules' hits.
+  - `log_only` (the module's, the set's or the rule's mode) writes the hits once, when the scan
+    ends, and never cuts.
 
 ## Tests
 
@@ -549,8 +585,12 @@ read.
   parsed configuration as `Module::load` would, requests that are refused (scanner UA, `/.env`, `union select` in a query, a `.php.jpg`
   upload, a denied country through a test database), let through (a clean page, an allowed
   address with a banned UA), `log_only` writing the line and letting through, `action: header`,
-  the ban after `on_blocks`, a honeypot path, a leaking upstream response replaced by 500 with
-  `handle_errors`, and a site's own rule replacing a built-in one. With the challenge built: a rule
+  the ban after `on_blocks`, a honeypot path, a leaking upstream 5xx replaced by 500 with
+  `handle_errors`, a streamed 200 cut at a leak in its first frame and at one split across two
+  frames (the client has no whole response, the log has `leak`), a clean 200 passed frame for
+  frame, a leak after `max_inspect` let through, `response.stream: false` replacing a 200,
+  `log_only` passing it whole, a header rule replacing a 200 before any byte, and a site's own
+  rule replacing a built-in one. With the challenge built: a rule
   with `action: challenge` answers the page (503, a nonce, not the error page) and, with the cookie
   earned at `POST /.well-known/c-wf`, lets the request through with the hit written as
   `challenge_passed`; `mode: challenge` turns the built-in blocks into the page; `ban.then:

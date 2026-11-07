@@ -69,10 +69,13 @@ pub async fn parts(boundary: &str, prefix: Bytes, max_parts: usize, head: usize)
     if max_parts == 0 || prefix.is_empty() {
         return Ok(parts);
     }
-    let (cut, keep) = cut_in(boundary, &prefix)?;
-    let body = &prefix[..keep];
-    let delimiter = format!("--{boundary}");
+    // One delimiter for the cut and the parts.
+    let mut delimiter = String::with_capacity(boundary.len() + 2);
+    delimiter.push_str("--");
+    delimiter.push_str(boundary);
     let delimiter = delimiter.as_bytes();
+    let (cut, keep) = cut_in(delimiter, &prefix)?;
+    let body = &prefix[..keep];
     let Some(first) = boundary_line(body, delimiter, 0) else {
         // Cut inside the first boundary line (`cut_in` saw the start of one).
         return Ok(parts);
@@ -119,11 +122,11 @@ pub async fn parts(boundary: &str, prefix: Bytes, max_parts: usize, head: usize)
                     let Some((key, text)) = parameter.split_once('=') else {
                         continue;
                     };
-                    let text = text.trim().trim_matches('"').to_string();
-                    match key.trim().to_ascii_lowercase().as_str() {
-                        "name" => part.name = text,
-                        "filename" => part.filename = Some(text),
-                        _ => {}
+                    let (key, text) = (key.trim(), text.trim().trim_matches('"'));
+                    if key.eq_ignore_ascii_case("name") {
+                        part.name = text.to_string();
+                    } else if key.eq_ignore_ascii_case("filename") {
+                        part.filename = Some(text.to_string());
                     }
                 }
             } else if name.eq_ignore_ascii_case(b"content-type") {
@@ -180,9 +183,7 @@ enum Cut {
 /// before the synthetic closing boundary: all of it, or, when it ends in the first bytes of a
 /// boundary line, the data before that line. A prefix with no boundary line that is not the start
 /// of one is not a body with this boundary: an error.
-fn cut_in(boundary: &str, prefix: &[u8]) -> anyhow::Result<(Cut, usize)> {
-    let delimiter = format!("--{boundary}");
-    let delimiter = delimiter.as_bytes();
+fn cut_in(delimiter: &[u8], prefix: &[u8]) -> anyhow::Result<(Cut, usize)> {
     // The last boundary line: `--boundary` at the start or after a CRLF.
     let mut from = prefix.len();
     let last = loop {

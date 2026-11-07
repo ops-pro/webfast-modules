@@ -124,8 +124,16 @@ impl Magic {
 
     /// The type a declared Content-Type names, if it is one known here.
     pub fn of_content_type(content_type: &str) -> Option<Magic> {
-        let kind = content_type.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
-        Some(match kind.as_str() {
+        let kind = content_type.split(';').next().unwrap_or("").trim();
+        // A part's type is lowercased already (multipart.rs): a copy only for one that is not.
+        let lowered;
+        let kind = if kind.bytes().any(|b| b.is_ascii_uppercase()) {
+            lowered = kind.to_ascii_lowercase();
+            lowered.as_str()
+        } else {
+            kind
+        };
+        Some(match kind {
             "image/png" => Magic::Png,
             "image/jpeg" | "image/jpg" | "image/pjpeg" => Magic::Jpeg,
             "image/gif" => Magic::Gif,
@@ -283,6 +291,30 @@ impl Compiled {
 
     pub fn rule_index(&self, id: &str) -> Option<usize> {
         self.rules.iter().position(|r| r.id == id)
+    }
+
+    /// For a response whose body is scanned as it streams: how many bytes to carry across a
+    /// frame boundary — the longest `response.body` literal less one, and `window` where a rule
+    /// is tested on the text beyond its literal (a regex, a per-value test); `None`: no rule reads
+    /// the response body.
+    pub fn response_carry(&self, window: usize) -> Option<usize> {
+        let mut carry: Option<usize> = None;
+        for &p in &self.phases[Phase::Response.index()] {
+            let plan = &self.plans[p];
+            if plan.target != Target::ResponseBody {
+                continue;
+            }
+            let literal = plan.automaton.as_ref().map_or(0, |a| a.max_pattern_len());
+            let tested = plan.chains.iter().any(|c| !c.per_value.is_empty())
+                || plan
+                    .pattern_rules
+                    .iter()
+                    .flatten()
+                    .any(|&(_, rule)| matches!(self.rules[rule as usize].matcher, Matcher::Regex(_)));
+            let needed = literal.saturating_sub(1).max(if tested { window } else { 0 });
+            carry = Some(carry.map_or(needed, |c| c.max(needed)));
+        }
+        carry
     }
 }
 

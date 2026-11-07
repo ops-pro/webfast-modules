@@ -206,6 +206,19 @@ pub struct Input<'a> {
     pub hidden: &'a [String],
 }
 
+/// Which plans of a phase run: all of them, or — for a streamed response (response.rs) — those
+/// on the status and headers once, then those on the body over each window of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Plans {
+    All,
+    /// Every plan but the `response.body` ones; the exclusions that apply to the request are
+    /// found now, while its head is at hand.
+    ResponseHead,
+    /// The `response.body` plans alone, on a window of the body: the request's head is not
+    /// looked at (the exclusions were found by `ResponseHead`).
+    ResponseBody,
+}
+
 /// A proxied response, for the `response` phase.
 pub struct ResponseData<'a> {
     pub status: u16,
@@ -372,13 +385,24 @@ impl Evaluation {
     /// Runs the plans of `phase` over `input`; `log_matched`: bytes of matched text kept per
     /// hit.
     pub fn run_phase(&mut self, compiled: &Compiled, phase: Phase, input: &Input<'_>, log_matched: usize) {
+        self.run_plans(compiled, phase, input, log_matched, Plans::All);
+    }
+
+    /// The `response` phase's plans that `plans` names (a streamed response: the head's once,
+    /// then the body's per window).
+    pub fn run_response(&mut self, compiled: &Compiled, input: &Input<'_>, log_matched: usize, plans: Plans) {
+        self.run_plans(compiled, Phase::Response, input, log_matched, plans);
+    }
+
+    fn run_plans(&mut self, compiled: &Compiled, phase: Phase, input: &Input<'_>, log_matched: usize, which: Plans) {
         self.phase = phase;
         if !compiled.has_phase(phase) {
             return;
         }
         BUFFERS.with(|cell| {
             let mut buffers = cell.borrow_mut();
-            if self.prepared == 0 || buffers.generation != self.prepared {
+            // A body window reads no part of the request: the buffers are left as they are.
+            if which != Plans::ResponseBody && (self.prepared == 0 || buffers.generation != self.prepared) {
                 prepare(input.parts, &mut buffers);
                 self.prepared = buffers.generation;
             }
@@ -400,14 +424,34 @@ impl Evaluation {
                 name_buf,
                 ..
             } = &mut *buffers;
-            let fixed = Fixed {
-                path,
-                match_path,
-                host,
-                query: input.parts.uri.query().unwrap_or(""),
-                query_pairs,
-                cookie_text,
-                cookie_pairs,
+            let fixed = if which == Plans::ResponseBody {
+                Fixed {
+                    path: "",
+                    match_path: "",
+                    host: "",
+                    query: "",
+                    query_pairs: &[],
+                    cookie_text: "",
+                    cookie_pairs: &[],
+                }
+            } else {
+                Fixed {
+                    path,
+                    match_path,
+                    host,
+                    query: input.parts.uri.query().unwrap_or(""),
+                    query_pairs,
+                    cookie_text,
+                    cookie_pairs,
+                }
+            };
+            if which == Plans::ResponseHead && !compiled.exclusions.is_empty() && self.active_exclusions.is_none() {
+                self.active_exclusions = Some(active_exclusions(compiled, &fixed));
+            }
+            let keep = |plan: &Plan| match which {
+                Plans::All => true,
+                Plans::ResponseHead => plan.target != Target::ResponseBody,
+                Plans::ResponseBody => plan.target == Target::ResponseBody,
             };
             let mut scratch = Scratch {
                 outs,
@@ -426,16 +470,20 @@ impl Evaluation {
                 if self.stopped() {
                     return;
                 }
-                self.run_plan(compiled, &compiled.plans[p], input, &fixed, &mut scratch, log_matched);
+                if keep(&compiled.plans[p]) {
+                    self.run_plan(compiled, &compiled.plans[p], input, &fixed, &mut scratch, log_matched);
+                }
             }
-            if !self.stopped() {
+            if !self.stopped() && which != Plans::ResponseBody {
                 self.run_arg_plans(compiled, phase, input, &fixed, &mut scratch, log_matched);
             }
             for &p in anomalies {
                 if self.stopped() {
                     return;
                 }
-                self.run_plan(compiled, &compiled.plans[p], input, &fixed, &mut scratch, log_matched);
+                if keep(&compiled.plans[p]) {
+                    self.run_plan(compiled, &compiled.plans[p], input, &fixed, &mut scratch, log_matched);
+                }
             }
         });
     }
@@ -1012,14 +1060,9 @@ impl Evaluation {
         if c.exclusions.is_empty() {
             return false;
         }
-        let active = self.active_exclusions.get_or_insert_with(|| {
-            c.exclusions
-                .iter()
-                .enumerate()
-                .filter(|(_, e)| e.applies(fixed.host, fixed.match_path))
-                .map(|(i, _)| i as u32)
-                .collect()
-        });
+        let active = self
+            .active_exclusions
+            .get_or_insert_with(|| active_exclusions(c, fixed));
         active.iter().any(|&e| {
             rule.excluded_by.contains(&e)
                 || c.exclusions[e as usize]
@@ -1028,6 +1071,16 @@ impl Evaluation {
                     .any(|excluded| excluded == target || names_value(excluded, target, name))
         })
     }
+}
+
+/// The exclusions whose host and path apply to the request.
+fn active_exclusions(c: &Compiled, fixed: &Fixed<'_>) -> Vec<u32> {
+    c.exclusions
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| e.applies(fixed.host, fixed.match_path))
+        .map(|(i, _)| i as u32)
+        .collect()
 }
 
 /// An exclusion of `args.q` also covers a hit of a rule on `args` (or `args_names`) at the

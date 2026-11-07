@@ -56,7 +56,6 @@ use std::time::{Duration, Instant};
 use webfast_core::body::Body;
 use webfast_core::config::Config;
 use webfast_core::extensions::{Checked, Client, ErrorPage};
-use webfast_core::handler::BoxFuture;
 use webfast_core::matcher::{PathPattern, host_matches};
 use webfast_core::module::{Check, Head, Module};
 
@@ -69,6 +68,11 @@ pub struct State {
     threshold: u32,
     status: StatusCode,
     leak_status: StatusCode,
+    /// `response.stream`: a 200 is scanned as it streams (response.rs).
+    response_stream: bool,
+    /// What a streamed response carries across a frame boundary; `None`: no rule reads the
+    /// response body.
+    response_carry: Option<usize>,
     log: webfast_core::eventlog::EventLog,
     log_matched: usize,
     log_passed: bool,
@@ -141,13 +145,9 @@ pub struct Ngfw {
 /// when the server starts (`Module::start`).
 static INSTALLED: ArcSwapOption<Ngfw> = ArcSwapOption::const_empty();
 
-/// What the head phase hands the body phase (`Check::body`), in the request's extensions (which
-/// want `Clone`: hence the `Arc`, one allocation that only a request whose body is to be read
-/// pays): the state the head ran with, its evaluation so far, and the body's kind.
-#[derive(Clone)]
-struct AfterHead(Arc<std::sync::Mutex<Option<Pending>>>);
-
-struct Pending {
+/// What the head phase hands the body phase (`Check::Pending`, by value: `Head::Body`): the state
+/// the head ran with, its evaluation so far, and the body's kind.
+pub struct Pending {
     state: Arc<State>,
     evaluation: Evaluation,
     geo: (Option<[u8; 2]>, Option<u32>),
@@ -388,6 +388,8 @@ impl State {
             threshold: file.threshold,
             status: status(file.response.status, "response.status")?,
             leak_status: status(file.response.leak_status, "response.leak_status")?,
+            response_stream: file.response.stream,
+            response_carry: compiled.response_carry(response::WINDOW),
             log,
             log_matched: file.log.as_ref().map_or(200, |l| l.matched),
             log_passed: file.log.as_ref().is_some_and(|l| l.passed),
@@ -778,14 +780,14 @@ impl Ngfw {
         match self.check_head(parts, client) {
             Head::Pass => Ok(body),
             Head::Refuse(response) => Err(response),
-            Head::Body => self.check_body(parts, body, client).await,
+            Head::Body(pending) => self.check_body(pending, parts, body, client).await,
         }
     }
 
     /// The head: `access` first, then the `connection` and `head` phases, synchronously. `Body`
     /// when the body's type is listed, there are rules for it and the head let it on: what the
-    /// body phase needs is left in the request's extensions (`AfterHead`) for `check_body`.
-    fn check_head(&self, parts: &mut http::request::Parts, client: Client<'_>) -> Head {
+    /// body phase needs is handed to `check_body` (`Head::Body(Pending)`).
+    fn check_head(&self, parts: &mut http::request::Parts, client: Client<'_>) -> Head<Pending> {
         let state = self.state.load_full();
         let compiled = &state.compiled;
         // The headers of `header` actions are the module's to set.
@@ -910,18 +912,13 @@ impl Ngfw {
             None
         };
         match kind {
-            Some(kind) => {
-                parts
-                    .extensions
-                    .insert(AfterHead(Arc::new(std::sync::Mutex::new(Some(Pending {
-                        state,
-                        evaluation,
-                        geo,
-                        hidden,
-                        kind,
-                    })))));
-                Head::Body
-            }
+            Some(kind) => Head::Body(Pending {
+                state,
+                evaluation,
+                geo,
+                hidden,
+                kind,
+            }),
             None => {
                 self.finish(&state, &evaluation, parts, ip, geo);
                 Head::Pass
@@ -929,24 +926,23 @@ impl Ngfw {
         }
     }
 
-    /// The `body` and `upload` phases, after `check_head` asked for the body (`AfterHead`); the
-    /// body is given back with the same bytes.
+    /// The `body` and `upload` phases, after `check_head` asked for the body with what it handed
+    /// on; the body is given back with the same bytes.
     #[allow(clippy::result_large_err)]
-    async fn check_body(&self, parts: &mut http::request::Parts, body: Body, client: Client<'_>) -> Checked {
-        let pending = parts
-            .extensions
-            .remove::<AfterHead>()
-            .and_then(|after| after.0.lock().ok()?.take());
-        let Some(Pending {
+    async fn check_body(
+        &self,
+        pending: Pending,
+        parts: &mut http::request::Parts,
+        body: Body,
+        client: Client<'_>,
+    ) -> Checked {
+        let Pending {
             state,
             mut evaluation,
             geo,
             hidden,
             kind,
-        }) = pending
-        else {
-            return Ok(body);
-        };
+        } = pending;
         let compiled = &state.compiled;
         let ip = client.ip;
         let prefix = match body::read_prefix(body, state.max_inspect).await {
@@ -1027,12 +1023,20 @@ fn parse(text: &str) -> Result<FileConfig> {
 }
 
 impl Check for Ngfw {
-    fn head(&self, req: &mut http::request::Parts, client: Client<'_>) -> Head {
+    type Pending = Pending;
+
+    fn head(&self, req: &mut http::request::Parts, client: Client<'_>) -> Head<Pending> {
         self.check_head(req, client)
     }
 
-    fn body<'a>(&'a self, req: &'a mut http::request::Parts, body: Body, client: Client<'a>) -> BoxFuture<'a, Checked> {
-        Box::pin(self.check_body(req, body, client))
+    fn body<'a>(
+        &'a self,
+        pending: Pending,
+        req: &'a mut http::request::Parts,
+        body: Body,
+        client: Client<'a>,
+    ) -> impl Future<Output = Checked> + Send + 'a {
+        self.check_body(pending, req, body, client)
     }
 }
 

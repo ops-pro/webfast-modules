@@ -39,7 +39,7 @@ use std::time::Duration;
 use token::{COOKIE_LEN, COOKIE_NAME, CookieData, Keys, NONCE_TTL, NonceData, now_secs};
 use webfast_core::body::Body;
 use webfast_core::extensions::{Checked, Client};
-use webfast_core::handler::{BoxFuture, ConnInfo};
+use webfast_core::handler::ConnInfo;
 use webfast_core::module::{Check, Directive, Head, Module, Order};
 
 /// Where the page posts its answer, on every site.
@@ -554,23 +554,23 @@ fn form_value(value: &[u8]) -> String {
 pub struct ChallengeEndpoint;
 
 impl Check for ChallengeEndpoint {
+    /// The head hands on nothing: the endpoint is the path and the method.
+    type Pending = ();
+
     fn head(&self, req: &mut http::request::Parts, _: Client<'_>) -> Head {
         if req.uri.path() != ENDPOINT || req.method != Method::POST {
             Head::Pass
         } else {
-            Head::Body
+            Head::Body(())
         }
     }
 
-    fn body<'a>(&'a self, req: &'a mut http::request::Parts, body: Body, client: Client<'a>) -> BoxFuture<'a, Checked> {
-        Box::pin(async move {
-            let form = match http_body_util::BodyExt::collect(http_body_util::Limited::new(body, MAX_ANSWER_BODY)).await
-            {
-                Ok(collected) => collected.to_bytes(),
-                Err(_) => return Err(status(StatusCode::BAD_REQUEST)),
-            };
-            Err(instance().answer(client.conn, req, client.ip, &form).await)
-        })
+    async fn body<'a>(&'a self, _: (), req: &'a mut http::request::Parts, body: Body, client: Client<'a>) -> Checked {
+        let form = match http_body_util::BodyExt::collect(http_body_util::Limited::new(body, MAX_ANSWER_BODY)).await {
+            Ok(collected) => collected.to_bytes(),
+            Err(_) => return Err(status(StatusCode::BAD_REQUEST)),
+        };
+        Err(instance().answer(client.conn, req, client.ip, &form).await)
     }
 }
 
@@ -744,9 +744,9 @@ mod tests {
         let mut get = parts("GET", ENDPOINT, &[]);
         assert!(matches!(ChallengeEndpoint.head(&mut get, client), Head::Pass));
         let mut bad = parts("POST", ENDPOINT, &[]);
-        assert!(matches!(ChallengeEndpoint.head(&mut bad, client), Head::Body));
+        assert!(matches!(ChallengeEndpoint.head(&mut bad, client), Head::Body(())));
         let refused = ChallengeEndpoint
-            .body(&mut bad, webfast_core::body::full("nonce=x"), client)
+            .body((), &mut bad, webfast_core::body::full("nonce=x"), client)
             .await
             .expect_err("answered");
         assert_eq!(refused.status(), StatusCode::BAD_REQUEST);

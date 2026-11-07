@@ -2,8 +2,10 @@
 //! harness with the module's instance put on the configuration, as `Module::load` would from
 //! WEB_NGFW_CONFIG, and a stub upstream that echoes the request's headers. Requests refused by the
 //! built-in sets, let through, `log_only` writing its line, the access lists, honeypots and the ban
-//! list, `action: header`, a leaking upstream response replaced through `handle_errors`, a site's
-//! rule replacing a built-in one, 444, `match.hosts`; with the challenge built, `action: challenge`,
+//! list, `action: header`, a leaking upstream error replaced through `handle_errors`, a streamed 200
+//! cut at a leak (in its first frame, split across two), a clean one passed frame for frame,
+//! `response.stream: false` and `log_only` on a leak, a header rule replacing a 200, a site's rule
+//! replacing a built-in one, 444, `match.hosts`; with the challenge built, `action: challenge`,
 //! `mode: challenge` and `ban.then: challenge`.
 
 use bytes::Bytes;
@@ -11,10 +13,13 @@ use http::Request;
 use http_body_util::{BodyExt, Full};
 use hyper::body::Incoming;
 use hyper_util::rt::TokioIo;
+use std::collections::VecDeque;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::path::Path;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 use std::time::Duration;
 use tokio::net::TcpListener;
 use webfast_core::config::Config;
@@ -67,12 +72,61 @@ const SCANNER: &str = "Mozilla/5.0 nikto/2.1.6";
 const LEAK: &str =
     "<html><body>Fatal error: Uncaught Error: Call to undefined function in /srv/app/x.php on line 3</body></html>";
 
+/// `/api/frames`: a clean page in four frames, 20 ms apart.
+const FRAMES: [&str; 4] = [
+    "<html><body>",
+    "<p>one</p>",
+    "<p>two, a bit longer</p>",
+    "</body></html>",
+];
+
+/// A body of `frames`, each after `gap` (the first at once): what an upstream that streams sends.
+struct Slow {
+    frames: VecDeque<Bytes>,
+    gap: Duration,
+    sleep: Option<Pin<Box<tokio::time::Sleep>>>,
+}
+
+impl http_body::Body for Slow {
+    type Data = Bytes;
+    type Error = Infallible;
+
+    fn poll_frame(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<http_body::Frame<Bytes>, Infallible>>> {
+        if let Some(sleep) = self.sleep.as_mut() {
+            std::task::ready!(sleep.as_mut().poll(cx));
+            self.sleep = None;
+        }
+        let Some(frame) = self.frames.pop_front() else {
+            return Poll::Ready(None);
+        };
+        if !self.frames.is_empty() {
+            self.sleep = Some(Box::pin(tokio::time::sleep(self.gap)));
+        }
+        Poll::Ready(Some(Ok(http_body::Frame::data(frame))))
+    }
+}
+
+fn slow(frames: &[&str], gap: Duration) -> http_body_util::combinators::UnsyncBoxBody<Bytes, Infallible> {
+    Slow {
+        frames: frames.iter().map(|f| Bytes::copy_from_slice(f.as_bytes())).collect(),
+        gap,
+        sleep: None,
+    }
+    .boxed_unsync()
+}
+
 fn site() -> tempfile::TempDir {
     harness::site(&[("en/index.html", "<!doctype html><title>Home</title>")])
 }
 
-/// Upstream stub: `/api/leak` answers a PHP error page with 200; everything else a JSON echo of
-/// the request (`uri`, and every header under `headers`, lowercased names).
+/// Upstream stub: `/api/leak` answers a PHP error page with 200 (one frame), `/api/leak500` with
+/// 500, `/api/split` with 200 in two frames 50 ms apart, the error text cut between them;
+/// `/api/frames` a clean page in four frames (`FRAMES`), `/api/late` 2 KiB of clean text then the
+/// error page, `/api/hdr` a clean page with a debug token header; everything else a JSON echo of the
+/// request (`uri`, and every header under `headers`, lowercased names).
 async fn upstream() -> SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -83,17 +137,37 @@ async fn upstream() -> SocketAddr {
             };
             tokio::spawn(async move {
                 let service = hyper::service::service_fn(|req: Request<Incoming>| async move {
-                    if req.uri().path() == "/api/leak" {
-                        let response = http::Response::builder()
+                    let page = |status: u16, body| {
+                        http::Response::builder()
+                            .status(status)
                             .header("content-type", "text/html; charset=utf-8")
                             .header("server", "Apache/2.4.57 (Debian)")
-                            .body(
-                                Full::new(Bytes::from(LEAK))
-                                    .map_err(|never| match never {})
-                                    .boxed_unsync(),
-                            )
-                            .unwrap();
-                        return Ok::<_, Infallible>(response);
+                            .body(body)
+                            .unwrap()
+                    };
+                    let full = |text: String| {
+                        Full::new(Bytes::from(text))
+                            .map_err(|never| match never {})
+                            .boxed_unsync()
+                    };
+                    match req.uri().path() {
+                        "/api/leak" => return Ok::<_, Infallible>(page(200, full(LEAK.to_string()))),
+                        "/api/leak500" => return Ok(page(500, full(LEAK.to_string()))),
+                        "/api/split" => {
+                            let first = format!("<html><body>{}Fatal er", "x".repeat(64));
+                            let parts = [first.as_str(), "ror: Uncaught Error in /srv/app/x.php</body></html>"];
+                            return Ok(page(200, slow(&parts, Duration::from_millis(50))));
+                        }
+                        "/api/frames" => return Ok(page(200, slow(&FRAMES, Duration::from_millis(20)))),
+                        "/api/late" => return Ok(page(200, full(format!("{}{LEAK}", "x".repeat(2048))))),
+                        "/api/hdr" => {
+                            let mut response = page(200, full("<html>clean</html>".to_string()));
+                            response
+                                .headers_mut()
+                                .insert("x-debug-token", http::HeaderValue::from_static("secret-1234"));
+                            return Ok(response);
+                        }
+                        _ => {}
                     }
                     let mut headers = serde_json::Map::new();
                     for (name, value) in req.headers() {
@@ -444,12 +518,12 @@ async fn a_header_action_marks_the_request_for_the_application() {
 }
 
 #[tokio::test]
-async fn a_leaking_upstream_response_is_replaced_through_handle_errors() {
+async fn a_leaking_upstream_error_is_replaced_through_handle_errors() {
     let dir = tempfile::tempdir().unwrap();
     let yaml = "log:\n  output: ngfw.log\n";
     let h = start(yaml, dir.path()).await;
 
-    let leak = h.get("/api/leak", &[]).await;
+    let leak = h.get("/api/leak500", &[]).await;
     assert_eq!(leak.status, 500);
     assert_eq!(
         leak.text(),
@@ -461,8 +535,8 @@ async fn a_leaking_upstream_response_is_replaced_through_handle_errors() {
     let line = log_line(&dir.path().join("ngfw.log"), |l| l.contains("\"decision\":\"leak\"")).await;
     assert_eq!(line["phase"], "response");
     assert_eq!(line["status"], 500);
+    assert_eq!(line["msg"], "response replaced");
     let hits = line["hits"].as_array().unwrap();
-    assert!(hits.iter().any(|hit| hit["id"] == "wf-950-100"), "{line}");
     assert!(
         hits.iter()
             .any(|hit| hit["id"] == "wf-950-100" && hit["matched"] == "Fatal error:"),
@@ -473,6 +547,167 @@ async fn a_leaking_upstream_response_is_replaced_through_handle_errors() {
     let clean = h.get("/api/echo?q=1", &[]).await;
     assert_eq!(clean.status, 200);
     assert_eq!(header(&clean, "x-upstream"), "1");
+    h.shutdown().await;
+}
+
+/// A GET of `path` on a connection of its own, and everything the server sent until it closed.
+async fn raw_get(h: &Harness, path: &str) -> Vec<u8> {
+    harness::raw(
+        h.server.addr,
+        format!(
+            "GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nUser-Agent: {UA}\r\nAccept: */*\r\nConnection: close\r\n\r\n"
+        )
+        .as_bytes(),
+    )
+    .await
+}
+
+/// Whether `got` is a whole HTTP/1.1 response: its head, and all of its body (the Content-Length
+/// of it, or the chunks to the last); the chunk sizes, for a chunked one.
+fn whole(got: &[u8]) -> (bool, Vec<usize>) {
+    let Some(end) = got.windows(4).position(|w| w == b"\r\n\r\n") else {
+        return (false, Vec::new());
+    };
+    let head = String::from_utf8_lossy(&got[..end]).to_ascii_lowercase();
+    let mut rest = &got[end + 4..];
+    if let Some(length) = head
+        .lines()
+        .find_map(|l| l.strip_prefix("content-length:"))
+        .and_then(|v| v.trim().parse::<usize>().ok())
+    {
+        return (rest.len() == length, Vec::new());
+    }
+    let mut sizes = Vec::new();
+    loop {
+        let Some(line) = rest.windows(2).position(|w| w == b"\r\n") else {
+            return (false, sizes);
+        };
+        let Ok(size) = usize::from_str_radix(String::from_utf8_lossy(&rest[..line]).trim(), 16) else {
+            return (false, sizes);
+        };
+        if size == 0 {
+            return (true, sizes);
+        }
+        if rest.len() < line + 2 + size + 2 {
+            return (false, sizes);
+        }
+        sizes.push(size);
+        rest = &rest[line + 2 + size + 2..];
+    }
+}
+
+#[tokio::test]
+async fn a_streamed_200_with_a_leak_is_cut_and_the_client_has_no_whole_response() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = start("log:\n  output: ngfw.log\n", dir.path()).await;
+
+    // In the first (and only) frame.
+    let got = raw_get(&h, "/api/leak").await;
+    let text = String::from_utf8_lossy(&got);
+    assert!(
+        !text.contains("Fatal error"),
+        "the frame with the leak is not sent: {text:?}"
+    );
+    assert!(
+        !whole(&got).0,
+        "the connection is closed before the response is whole: {text:?}"
+    );
+    let line = log_line(&dir.path().join("ngfw.log"), |l| l.contains("\"decision\":\"leak\"")).await;
+    assert_eq!(line["msg"], "response cut");
+    assert_eq!(line["status"], 200);
+    assert_eq!(line["request"]["uri"], "/api/leak");
+    assert!(
+        line["hits"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|hit| hit["id"] == "wf-950-100" && hit["matched"] == "Fatal error:"),
+        "{line}"
+    );
+
+    // Split between two frames sent 50 ms apart: the first goes out, the second does not.
+    let got = raw_get(&h, "/api/split").await;
+    let text = String::from_utf8_lossy(&got);
+    assert!(text.starts_with("HTTP/1.1 200"), "the head went out at once: {text:?}");
+    assert!(text.contains("Fatal er"), "the frame before the hit went out: {text:?}");
+    assert!(
+        !text.contains("ror: Uncaught"),
+        "the frame with the hit's end did not: {text:?}"
+    );
+    assert!(!whole(&got).0, "no last chunk: {text:?}");
+
+    // The server goes on: a clean page on a new connection.
+    let clean = h.get("/api/frames", &[]).await;
+    assert_eq!(clean.status, 200);
+    h.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_clean_streamed_200_goes_out_frame_for_frame_and_a_late_leak_is_not_looked_at() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = start("body:\n  max_inspect: 1KiB\n", dir.path()).await;
+
+    let got = raw_get(&h, "/api/frames").await;
+    let (whole, sizes) = whole(&got);
+    assert!(whole, "{:?}", String::from_utf8_lossy(&got));
+    assert_eq!(
+        sizes,
+        FRAMES.iter().map(|f| f.len()).collect::<Vec<_>>(),
+        "the upstream's frames, as they came"
+    );
+    assert!(String::from_utf8_lossy(&got).ends_with(&format!("{}\r\n0\r\n\r\n", FRAMES[3])));
+
+    // After the first max_inspect bytes the frames pass unscanned.
+    let late = h.get("/api/late", &[]).await;
+    assert_eq!(late.status, 200);
+    assert!(late.text().ends_with(LEAK), "the whole body: {}", late.text().len());
+    h.shutdown().await;
+}
+
+#[tokio::test]
+async fn stream_false_holds_and_replaces_a_200_and_log_only_lets_it_through() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = start("response:\n  stream: false\n", dir.path()).await;
+    let leak = h.get("/api/leak", &[]).await;
+    assert_eq!(leak.status, 500);
+    assert_eq!(leak.text(), "leak 500", "held and replaced, as before streaming");
+    h.shutdown().await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let h = start("mode: log_only\nlog:\n  output: ngfw.log\n", dir.path()).await;
+    let leak = h.get("/api/leak", &[]).await;
+    assert_eq!(leak.status, 200);
+    assert_eq!(leak.text(), LEAK, "the whole body goes out");
+    let line = log_line(&dir.path().join("ngfw.log"), |l| l.contains("\"phase\":\"response\"")).await;
+    assert_eq!(line["decision"], "log_only");
+    assert_eq!(line["status"], 200);
+    h.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_header_rule_replaces_a_streamed_200_before_any_byte() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("site.yaml"),
+        "rules:
+  - id: site-100
+    phase: response
+    msg: \"a debug token in a response\"
+    targets: [response.headers.x-debug-token]
+    operator: { contains_any: [secret] }
+    action: block
+",
+    )
+    .unwrap();
+    let h = start("rules:\n  include: [site.yaml]\n", dir.path()).await;
+    let replaced = h.get("/api/hdr", &[]).await;
+    assert_eq!(replaced.status, 500);
+    assert_eq!(
+        replaced.text(),
+        "leak 500",
+        "the whole response replaced, its body unread"
+    );
+    assert_eq!(header(&replaced, "x-debug-token"), "");
     h.shutdown().await;
 }
 

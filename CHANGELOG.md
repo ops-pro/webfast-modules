@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+- **The response phase streams a 200 and holds only a 5xx** (docs/ngfw.md "Response phase"). A
+  covered 200 goes out at once: its status and header rules run before any byte (a hit replaces
+  the response by `leak_status`, as before), then each body frame is scanned as it passes — the
+  automaton over the frame and over a window across each frame boundary (the longest literal
+  less one, 512 bytes where a body rule is a regex), so a leak split between frames is found —
+  until `body.max_inspect` bytes were. At a hit the frame that has it is not forwarded: the body
+  ends with an error, HTTP/1.1 closes the connection, HTTP/2 resets the stream, HTTP/3 stops it,
+  and the event is written as `leak` ("response cut"); `log_only` writes it and lets the body
+  through. A 5xx is held up to `max_inspect` and replaced through `handle_errors` as before.
+  `response.stream: false` holds and replaces a 200 too. The holding of an 8 KiB 200 is gone
+  (in process on one core, the filter on less off, the best of three runs: a 1 KiB form POST to a
+  proxied 8 KiB page 39.7 µs before and 37.0 µs after, a 4 KiB upload 32.9 µs and 27.9 µs);
+  nothing is allocated per frame.
+- **Built on webfast-core's staged checks by value** (webfast's CHANGELOG): the filter's
+  `Check::Pending` is what its head found (the state, the evaluation so far, the body's kind),
+  handed to the body phase in `Head::Body` instead of through the request's extensions (an `Arc`
+  and a mutex, a map entry); the challenge's endpoint hands on `()`. `Check::body` and
+  `Inspect::inspect` are `async fn`s, boxed once by the core for the whole set.
+- Fewer allocations on the body path: the Content-Type's media type compared without a
+  lowercased copy (four strings per proxied POST), the body prefix of one frame held without a
+  queue, a form's names decoded straight into the pairs' buffer, a multipart body's delimiter
+  made once and its parameter names compared without a lowercased copy. A 1 KiB form POST through
+  the filter to a proxied 8 KiB page: 37 allocations (49 before), a 4 KiB multipart upload 43 (58).
+
 ## 0.1.0 — 2026-11-07
 
 The first release: two modules of webfast as crates on the module API of `webfast-core`

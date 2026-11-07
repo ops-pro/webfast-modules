@@ -23,6 +23,8 @@ pub enum Outcome {
     Access(&'static str),
     /// A response replaced in the `response` phase.
     Leak,
+    /// A streamed response ended at a leak in its body (`decision` `leak` too).
+    Cut,
     /// Answered with the browser challenge (docs/challenge.md); the reason when `access` asked
     /// (`country`, `asn`, `ban`), none for the rules.
     Challenge(Option<&'static str>),
@@ -38,7 +40,7 @@ impl Outcome {
             Outcome::LogOnly => "log_only",
             Outcome::Scored => "scored",
             Outcome::Access(_) => "access",
-            Outcome::Leak => "leak",
+            Outcome::Leak | Outcome::Cut => "leak",
             Outcome::Challenge(_) => "challenge",
             Outcome::ChallengePassed(_) => "challenge_passed",
         }
@@ -50,6 +52,7 @@ impl Outcome {
             Outcome::LogOnly => "request let through (log_only)",
             Outcome::Scored => "request scored",
             Outcome::Leak => "response replaced",
+            Outcome::Cut => "response cut",
             Outcome::Challenge(_) => "request challenged",
             Outcome::ChallengePassed(_) => "request let through (challenge passed)",
         }

@@ -22,9 +22,10 @@ pub struct Prefix {
     pub body: Body,
 }
 
-/// Reads frames of `body` until at least `max` bytes of data were seen, or the end.
+/// Reads frames of `body` until at least `max` bytes of data were seen, or the end. The frames
+/// are held in a `Frames` (no allocation for one, the usual case of a small body).
 pub async fn read_prefix(mut body: Body, max: usize) -> Result<Prefix, BoxError> {
-    let mut frames: VecDeque<Frame<Bytes>> = VecDeque::new();
+    let mut frames = Frames::default();
     let mut total = 0;
     let mut complete = false;
     loop {
@@ -36,7 +37,7 @@ pub async fn read_prefix(mut body: Body, max: usize) -> Result<Prefix, BoxError>
                 if let Some(data) = frame.data_ref() {
                     total += data.len();
                 }
-                frames.push_back(frame);
+                frames.push(frame);
             }
             Some(Err(e)) => return Err(e),
             None => {
@@ -63,8 +64,8 @@ pub async fn read_prefix(mut body: Body, max: usize) -> Result<Prefix, BoxError>
             }
         }
     };
-    let body = if complete && frames.len() <= 1 && frames.front().is_none_or(Frame::is_data) {
-        webfast_core::body::full(frames.pop_front().and_then(|f| f.into_data().ok()).unwrap_or_default())
+    let body = if complete && frames.len() <= 1 && frames.first.as_ref().is_none_or(Frame::is_data) {
+        webfast_core::body::full(frames.pop().and_then(|f| f.into_data().ok()).unwrap_or_default())
     } else {
         webfast_core::body::boxed(Chained {
             frames,
@@ -81,9 +82,43 @@ fn hex_pair(hi: u8, lo: u8) -> Option<u8> {
     Some((hi * 16 + lo) as u8)
 }
 
+/// Frames in order: the first inline, the others (rare: a prefix read in pieces) in a queue made
+/// only for them.
+#[derive(Default)]
+struct Frames {
+    first: Option<Frame<Bytes>>,
+    more: VecDeque<Frame<Bytes>>,
+}
+
+impl Frames {
+    fn push(&mut self, frame: Frame<Bytes>) {
+        if self.first.is_none() && self.more.is_empty() {
+            self.first = Some(frame);
+        } else {
+            self.more.push_back(frame);
+        }
+    }
+
+    fn pop(&mut self) -> Option<Frame<Bytes>> {
+        self.first.take().or_else(|| self.more.pop_front())
+    }
+
+    fn len(&self) -> usize {
+        usize::from(self.first.is_some()) + self.more.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &Frame<Bytes>> {
+        self.first.iter().chain(self.more.iter())
+    }
+}
+
 /// The frames read first, then the rest of the stream.
 struct Chained {
-    frames: VecDeque<Frame<Bytes>>,
+    frames: Frames,
     rest: Option<Body>,
 }
 
@@ -92,7 +127,7 @@ impl http_body::Body for Chained {
     type Error = BoxError;
 
     fn poll_frame(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Result<Frame<Bytes>, BoxError>>> {
-        if let Some(frame) = self.frames.pop_front() {
+        if let Some(frame) = self.frames.pop() {
             return Poll::Ready(Some(Ok(frame)));
         }
         match self.rest.as_mut() {
@@ -139,26 +174,37 @@ pub enum Kind {
     Text,
 }
 
-/// The Content-Type's media type, lowercased, without parameters.
-pub fn media_type(headers: &HeaderMap) -> Option<String> {
+/// The Content-Type's media type, without parameters, as sent: compare it ignoring ASCII case
+/// (nothing is allocated to lowercase it).
+pub fn media_type(headers: &HeaderMap) -> Option<&str> {
     let value = headers.get(http::header::CONTENT_TYPE)?.to_str().ok()?;
-    Some(value.split(';').next().unwrap_or("").trim().to_ascii_lowercase())
+    Some(value.split(';').next().unwrap_or("").trim())
+}
+
+/// Whether `text` starts with `prefix`, ignoring ASCII case.
+pub fn starts_with_ignore_case(text: &str, prefix: &str) -> bool {
+    text.len() >= prefix.len() && text.as_bytes()[..prefix.len()].eq_ignore_ascii_case(prefix.as_bytes())
 }
 
 /// The kind of a body whose type is one of `types`; `None`: not inspected.
 pub fn kind_of(headers: &HeaderMap, types: &[String]) -> Option<Kind> {
     let media = media_type(headers)?;
-    if !types.iter().any(|t| t.eq_ignore_ascii_case(&media)) {
+    if !types.iter().any(|t| t.eq_ignore_ascii_case(media)) {
         return None;
     }
-    Some(match media.as_str() {
-        "application/x-www-form-urlencoded" => Kind::Form,
-        "application/json" => Kind::Json,
-        "multipart/form-data" => Kind::Multipart {
+    let is = |name: &str| media.eq_ignore_ascii_case(name);
+    Some(if is("application/x-www-form-urlencoded") {
+        Kind::Form
+    } else if is("application/json") {
+        Kind::Json
+    } else if is("multipart/form-data") {
+        Kind::Multipart {
             boundary: multipart::boundary(headers.get(http::header::CONTENT_TYPE)?)?,
-        },
-        other if other.ends_with("+json") => Kind::Json,
-        _ => Kind::Text,
+        }
+    } else if media.len() >= 5 && media.as_bytes()[media.len() - 5..].eq_ignore_ascii_case(b"+json") {
+        Kind::Json
+    } else {
+        Kind::Text
     })
 }
 
@@ -244,7 +290,6 @@ fn parse_form(body: &[u8]) -> (String, Vec<Pair>) {
     let mut decoded: Vec<u8> = Vec::with_capacity(body.len());
     let mut pairs = Vec::with_capacity(body.len() / 16 + 1);
     let valid = std::str::from_utf8(body).is_ok();
-    let mut name: Vec<u8> = Vec::new();
     let next = |from: usize, special: fn(u8) -> bool| {
         from + body[from..]
             .iter()
@@ -253,12 +298,12 @@ fn parse_form(body: &[u8]) -> (String, Vec<Pair>) {
     };
     let mut i = 0;
     while i < body.len() {
+        // The name is decoded into `decoded` itself, made UTF-8 below.
         let name_start = decoded.len() as u32;
-        name.clear();
         let mut has_value = false;
         while i < body.len() {
             let run = next(i, |b| matches!(b, b'&' | b'=' | b'%' | b'+'));
-            name.extend_from_slice(&body[i..run]);
+            decoded.extend_from_slice(&body[i..run]);
             i = run;
             if i == body.len() {
                 break;
@@ -271,25 +316,29 @@ fn parse_form(body: &[u8]) -> (String, Vec<Pair>) {
                     break;
                 }
                 b'%' if i + 2 < body.len() && hex_pair(body[i + 1], body[i + 2]).is_some() => {
-                    name.push(hex_pair(body[i + 1], body[i + 2]).unwrap_or(0));
+                    decoded.push(hex_pair(body[i + 1], body[i + 2]).unwrap_or(0));
                     i += 3;
                 }
                 b'+' => {
-                    name.push(b' ');
+                    decoded.push(b' ');
                     i += 1;
                 }
                 b => {
-                    name.push(b);
+                    decoded.push(b);
                     i += 1;
                 }
             }
         }
-        if name.is_empty() && !has_value {
+        if decoded.len() == name_start as usize && !has_value {
             // An empty piece: `&&`, or a trailing `&`.
             i += 1;
             continue;
         }
-        push_lossy_bytes(&name, &mut decoded);
+        if std::str::from_utf8(&decoded[name_start as usize..]).is_err() {
+            // A name decoded to bytes that are not UTF-8 (rare): replaced, in a copy.
+            let name = decoded.split_off(name_start as usize);
+            push_lossy_bytes(&name, &mut decoded);
+        }
         let value_start = decoded.len();
         let end = next(i, |b| b == b'&');
         if valid {
