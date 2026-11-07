@@ -74,6 +74,13 @@ pub async fn read_prefix(mut body: Body, max: usize) -> Result<Prefix, BoxError>
     Ok(Prefix { bytes, complete, body })
 }
 
+/// The byte two hex digits spell, if both are hex digits.
+fn hex_pair(hi: u8, lo: u8) -> Option<u8> {
+    let hi = (hi as char).to_digit(16)?;
+    let lo = (lo as char).to_digit(16)?;
+    Some((hi * 16 + lo) as u8)
+}
+
 /// The frames read first, then the rest of the stream.
 struct Chained {
     frames: VecDeque<Frame<Bytes>>,
@@ -263,11 +270,8 @@ fn parse_form(body: &[u8]) -> (String, Vec<Pair>) {
                     i += 1;
                     break;
                 }
-                b'%' if i + 2 < body.len()
-                    && let (Some(hi), Some(lo)) =
-                        ((body[i + 1] as char).to_digit(16), (body[i + 2] as char).to_digit(16)) =>
-                {
-                    name.push((hi * 16 + lo) as u8);
+                b'%' if i + 2 < body.len() && hex_pair(body[i + 1], body[i + 2]).is_some() => {
+                    name.push(hex_pair(body[i + 1], body[i + 2]).unwrap_or(0));
                     i += 3;
                 }
                 b'+' => {
