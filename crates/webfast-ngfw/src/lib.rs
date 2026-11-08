@@ -81,6 +81,8 @@ pub struct State {
     log: webfast_core::eventlog::EventLog,
     log_matched: usize,
     log_passed: bool,
+    /// `log.test_marker`: the header whose requests also write a marker line (go-ftw).
+    test_marker: Option<HeaderName>,
     compiled: Compiled,
     loaded: Loaded,
     max_inspect: usize,
@@ -293,8 +295,19 @@ impl State {
         if file.access.ban.then == ban::Then::Challenge {
             config::needs_challenge("access.ban.then: challenge")?;
         }
-        let (rules, loaded) = config::compose(&file.rules, base)?;
+        let (rules, mut loaded) = config::compose(&file.rules, base)?;
         let compiled = compile::compile(&rules, file.mode, &file.rules.exclusions)?;
+        let test_marker = match file.log.as_ref().and_then(|l| l.test_marker.as_deref()) {
+            Some(name) => {
+                let header = HeaderName::try_from(name.trim())
+                    .map_err(|_| anyhow::anyhow!("log.test_marker: not a header name: {name:?}"))?;
+                loaded.warnings.push(format!(
+                    "log.test_marker: a request with the header {header} also writes a marker line (go-ftw)"
+                ));
+                Some(header)
+            }
+            None => None,
+        };
         let geo = match &file.geo {
             Some(config) if config.country_db.is_some() || config.asn_db.is_some() => Some(Geo::open(config, base)?),
             _ => None,
@@ -398,6 +411,7 @@ impl State {
             log,
             log_matched: file.log.as_ref().map_or(200, |l| l.matched),
             log_passed: file.log.as_ref().is_some_and(|l| l.passed),
+            test_marker,
             compiled,
             loaded,
             max_inspect: config::size(&file.body.max_inspect).context("body.max_inspect")?,
@@ -794,6 +808,22 @@ impl Ngfw {
     /// body phase needs is handed to `check_body` (`Head::Body(Pending)`).
     fn check_head(&self, parts: &mut http::request::Parts, client: Client<'_>) -> Head<Pending> {
         let state = self.state.load_full();
+        if let Some(name) = &state.test_marker
+            && let Some(value) = parts.headers.get(name)
+        {
+            // go-ftw's marker (log.test_marker): its value in a line of its own; the request is
+            // checked as any other.
+            let value = value.to_str().unwrap_or("");
+            state
+                .log
+                .record_with("info", "test marker", client.ip, parts, &|_| {}, &|line| {
+                    line.push_str(r#","marker_header":""#);
+                    webfast_core::accesslog::json_escape(line, name.as_str());
+                    line.push_str(r#"","marker":""#);
+                    webfast_core::accesslog::json_escape(line, value);
+                    line.push('"');
+                });
+        }
         let compiled = &state.compiled;
         // The headers of `header` actions are the module's to set.
         for name in &compiled.header_names {

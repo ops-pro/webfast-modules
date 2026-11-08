@@ -1200,3 +1200,35 @@ async fn a_denied_country_is_refused_and_the_country_header_is_set() {
     assert_eq!(local.upstream_header("x-client-country"), "--");
     h.shutdown().await;
 }
+
+/// `log.test_marker` (go-ftw): a request with the header writes its value as a marker line and is
+/// still checked — a probe with the header is refused as without it — and a hit names its rule's
+/// number as `ruleId`, where go-ftw looks for it.
+#[tokio::test]
+async fn a_test_marker_is_written_and_the_marked_request_still_checked() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = start(
+        "mode: block\nlog:\n  output: ngfw.log\n  test_marker: X-CRS-Test\n",
+        dir.path(),
+    )
+    .await;
+    let log = dir.path().join("ngfw.log");
+    let clean = h.get("/api/echo", &[("x-crs-test", "stage-1-start")]).await;
+    assert_eq!(clean.status, 200, "{}", clean.text());
+    let marker = log_line(&log, |l| l.contains("stage-1-start")).await;
+    assert_eq!(marker["msg"], "test marker");
+    assert_eq!(marker["marker_header"], "x-crs-test");
+    assert_eq!(marker["marker"], "stage-1-start");
+    let probe = h.get("/.env", &[("x-crs-test", "stage-2-start")]).await;
+    assert_eq!(probe.status, 403, "the marker header lets nothing through");
+    let line = log_line(&log, |l| l.contains("wf-913-210")).await;
+    let hit = line["hits"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|hit| hit["id"] == "wf-913-210")
+        .unwrap()
+        .clone();
+    assert_eq!(hit["ruleId"], 913210);
+    h.shutdown().await;
+}

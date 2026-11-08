@@ -67,6 +67,7 @@ targets are facts the parser records while reading the request (docs/ngfw.md, Ta
 **Method not in GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS**
 
 - Set `protocol`, phase `head`
+- Number `920100` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `method`
 - Transformations: none
 - Operator: `regex`:
@@ -90,6 +91,7 @@ another hit.
 **HTTP/1.0 request without a Host header**
 
 - Set `protocol`, phase `head`
+- Number `920110` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `anomaly.http10_without_host`
 - Transformations: none
 - Operator: `exists`
@@ -107,6 +109,7 @@ probe is better given its own path and excluded there (or `disable: [wf-920-110]
 **Control character in the path or a header**
 
 - Set `protocol`, phase `head`
+- Number `920120` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `path_raw`, `headers`
 - Transformations: none
 - Operator: `contains_any`: `\x00`, `\x01`, `\x02`, `\x03`, `\x04`, `\x05`, `\x06`, `\x07`, `\x08`, `\x0b`, `\x0c`, `\x0e`, `\x0f`, `\x10`, `\x11`, `\x12`, `\x13`, `\x14`, `\x15`, `\x16`, `\x17`, `\x18`, `\x19`, `\x1a`, `\x1b`, `\x1c`, `\x1d`, `\x1e`, `\x1f`, `\x7f`
@@ -124,6 +127,7 @@ what gets through. False positives are practically unknown.
 **Byte sequence that is not UTF-8 in the path or a header**
 
 - Set `protocol`, phase `head`
+- Number `920130` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `path_raw`, `headers`
 - Transformations: `url_decode`
 - Operator: `not_valid_utf8`
@@ -141,6 +145,7 @@ the false positives; a site that has them lowers the score or excludes the path.
 **Null byte (%00) in the path or query**
 
 - Set `protocol`, phase `head`
+- Number `920140` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `path_raw`, `query`
 - Transformations: none
 - Operator: `contains_any`: `%00`
@@ -157,6 +162,7 @@ data in the query (rare, and better in a body) would need the rule excluded on i
 **Double URL encoding**
 
 - Set `protocol`, phase `head`
+- Number `920150` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `anomaly.double_encoding`
 - Transformations: none
 - Operator: `exists`
@@ -175,6 +181,7 @@ excluded by target (`exclusions: [{paths: [...], targets: [args.redirect]}]`).
 **Path with `..` left after normalization**
 
 - Set `protocol`, phase `head`
+- Number `920160` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `path_raw`
 - Transformations: `url_decode`, `normalize_path`, `remove_nulls`, `lowercase`
 - Operator: `contains_any`: `..`
@@ -192,6 +199,7 @@ with such names excludes on their paths.
 **Two Content-Length headers, or Content-Length with Transfer-Encoding**
 
 - Set `protocol`, phase `head`
+- Number `920170` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `anomaly.duplicate_content_length`
 - Transformations: none
 - Operator: `exists`
@@ -209,6 +217,7 @@ error; no correct client sends it.
 **Path over 2048 bytes**
 
 - Set `protocol`, phase `head`
+- Number `920180` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `path_raw`
 - Transformations: none
 - Operator: `length_gt: 2048`
@@ -226,6 +235,7 @@ can pass it; they raise the limit with an override of their own (`override: {wf-
 **Query string over 8192 bytes**
 
 - Set `protocol`, phase `head`
+- Number `920190` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `query`
 - Transformations: none
 - Operator: `length_gt: 8192`
@@ -242,6 +252,7 @@ POST body, and a site that cannot move it raises the limit by `override`.
 **Cookie value over 8192 bytes**
 
 - Set `protocol`, phase `head`
+- Number `920200` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `cookies`
 - Transformations: none
 - Operator: `length_gt: 8192`
@@ -258,6 +269,7 @@ limit; one that does not is excluded by its name (`targets: [cookies.<name>]`).
 **Header value over 8192 bytes**
 
 - Set `protocol`, phase `head`
+- Number `920210` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `headers`
 - Transformations: none
 - Operator: `length_gt: 8192`
@@ -274,6 +286,7 @@ header is excluded by target (`targets: [headers.authorization]`) where that is 
 **More than 128 parameters**
 
 - Set `protocol`, phase `head`
+- Number `920220` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args_count`
 - Transformations: none
 - Operator: `gt: 128`
@@ -290,6 +303,7 @@ are excluded, or the limit raised by `override`.
 **More than 64 cookies**
 
 - Set `protocol`, phase `head`
+- Number `920230` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `cookies`
 - Transformations: none
 - Operator: `count_gt: 64`
@@ -306,6 +320,7 @@ against parsers. Raise the count by `override` on such a site.
 **No User-Agent header**
 
 - Set `protocol`, phase `head`
+- Number `920300` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `ua`
 - Transformations: none
 - Operator: `missing`
@@ -322,6 +337,7 @@ excludes the rule on its paths.
 **No Accept header**
 
 - Set `protocol`, phase `head`
+- Number `920310` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `headers.accept`
 - Transformations: none
 - Operator: `missing`
@@ -337,6 +353,7 @@ neither do some API and feed clients. A notice that only adds to other hits.
 **Body does not match its declared Content-Type (JSON declared, not JSON)**
 
 - Set `protocol`, phase `body`
+- Number `920400` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `anomaly.body_type_mismatch`
 - Transformations: none
 - Operator: `exists`
@@ -353,6 +370,7 @@ application reads it another way. A body cut at `max_inspect` is not counted as 
 **POST without a Content-Type**
 
 - Set `protocol`, phase `head`
+- Number `920410` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `anomaly.post_without_content_type`
 - Transformations: none
 - Operator: `exists`
@@ -369,6 +387,7 @@ it; their endpoint is excluded by path.
 **Range header with more than 16 parts**
 
 - Set `protocol`, phase `head`
+- Number `920440` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `headers.range`
 - Transformations: `compress_whitespace`
 - Operator: `regex`:
@@ -390,6 +409,7 @@ ranges. False positives are practically unknown.
 **JSON body nested deeper than json_max_depth**
 
 - Set `protocol`, phase `body`
+- Number `920520` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `anomaly.json_depth`
 - Transformations: none
 - Operator: `exists`
@@ -425,6 +445,7 @@ probes for turns it off: a WordPress site disables wf-913-200 (`disable: [wf-913
 **User-Agent of a vulnerability scanner**
 
 - Set `scanners`, phase `head`
+- Number `913100` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `ua`
 - Transformations: `lowercase`
 - Operator: `contains_any`: `sqlmap`, `nikto`, `nuclei`, `masscan`, `zgrab`, `nmap`, `dirbuster`, `gobuster`, `wpscan`, `acunetix`, `nessus`, `openvas`, `burp`, `havij`, `arachni`, `w3af`, `whatweb`
@@ -444,6 +465,7 @@ the rare false positive.
 **WordPress probe on a site that is not WordPress**
 
 - Set `scanners`, phase `head`
+- Number `913200` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `path`
 - Transformations: `lowercase`
 - Operator: `contains_any`: `/wp-login.php`, `/wp-admin/`, `/xmlrpc.php`
@@ -461,6 +483,7 @@ keeps the others of the set.
 **Probe for a dot-file: environment, version control, editor and cloud settings**
 
 - Set `scanners`, phase `head`
+- Number `913210` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `path`
 - Transformations: `lowercase`
 - Operator: `contains_any`: `/.env`, `/.git/`, `/.svn/`, `/.hg/`, `/.ds_store`, `/.aws/`, `/.htpasswd`, `/.vscode/`
@@ -479,6 +502,7 @@ rare false positive; exclude the rule on it.
 **Probe for an admin tool, a framework endpoint or a router interface**
 
 - Set `scanners`, phase `head`
+- Number `913220` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `path`
 - Transformations: `lowercase`
 - Operator: `contains_any`: `/phpmyadmin`, `/pma/`, `/adminer`, `/actuator/`, `/server-status`, `/vendor/phpunit`, `/cgi-bin/`, `/boaform/`, `/hnap1`
@@ -497,6 +521,7 @@ application, an actuator behind the proxy) excludes the rule on that path
 **Backup, dump or configuration file asked for in the site root**
 
 - Set `scanners`, phase `head`
+- Number `913230` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `path`
 - Transformations: `lowercase`
 - Operator: `regex`:
@@ -532,6 +557,7 @@ OWASP: A01 Broken Access Control.
 **Directory traversal sequence (../ or ..\) in the path, query or a cookie**
 
 - Set `traversal`, phase `head`
+- Number `930100` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `path_raw`, `query`, `args`, `cookies`
 - Transformations: `url_decode`, `remove_nulls`, `lowercase`, `compress_whitespace`
 - Operator: `contains_any`: `../`, `..\`, `/..`, `..;/`
@@ -550,6 +576,7 @@ file manager, a relative `return=` link); such a parameter is excluded by target
 **Operating system file in a parameter or the path**
 
 - Set `traversal`, phase `head`
+- Number `930110` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `path`, `cookies`
 - Transformations: `url_decode`, `normalize_path`, `remove_nulls`, `lowercase`
 - Operator: `contains_any`: `/etc/passwd`, `/etc/shadow`, `/proc/self`, `/windows/win.ini`, `c:/windows`, `c:\windows`, `boot.ini`
@@ -568,6 +595,7 @@ takes such text.
 **php://filter wrapper or .../ sequence**
 
 - Set `traversal`, phase `head`
+- Number `930120` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `path_raw`, `cookies`
 - Transformations: `url_decode`, `remove_nulls`, `lowercase`, `compress_whitespace`
 - Operator: `contains_any`: `php://filter`, `.../`
@@ -597,6 +625,7 @@ OWASP: A10 Server-Side Request Forgery (and A03 Injection for the include wrappe
 **URL to an address, localhost or a metadata service in a target parameter**
 
 - Set `rfi`, phase `head`
+- Number `931100` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args.url`, `args.uri`, `args.src`, `args.dest`, `args.redirect`, `args.next`, `args.path`, `args.file`, `args.page`, `args.include`, `args.template`, `args.callback`
 - Transformations: `url_decode`, `remove_nulls`, `lowercase`, `compress_whitespace`
 - Operator: `regex`:
@@ -621,6 +650,7 @@ the parameter on its path.
 **file://, gopher:// or dict:// scheme in a parameter**
 
 - Set `rfi`, phase `head`
+- Number `931110` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `cookies`, `path_raw`
 - Transformations: `url_decode`, `remove_nulls`, `lowercase`, `compress_whitespace`
 - Operator: `contains_any`: `file://`, `gopher://`, `dict://`
@@ -649,6 +679,7 @@ OWASP: A03 Injection.
 **Shell metacharacter followed by a command name**
 
 - Set `cmdi`, phase `head`
+- Number `932100` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `cookies`, `body`
 - Transformations: `url_decode`, `remove_nulls`, `lowercase`, `cmd_line`
 - Operator: `regex`:
@@ -672,6 +703,7 @@ site; those parameters are excluded by target.
 **Shell or interpreter named by path**
 
 - Set `cmdi`, phase `head`
+- Number `932110` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `cookies`, `path_raw`, `body`
 - Transformations: `url_decode`, `remove_nulls`, `lowercase`, `cmd_line`
 - Operator: `contains_any`: `/bin/sh`, `/bin/bash`, `cmd.exe`, `powershell`
@@ -689,6 +721,7 @@ it excludes the rule on its search and content parameters.
 **Newline (%0a) followed by a command name**
 
 - Set `cmdi`, phase `head`
+- Number `932120` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `query`, `path_raw`, `cookies`
 - Transformations: `url_decode`, `remove_nulls`, `lowercase`
 - Operator: `regex`:
@@ -728,6 +761,7 @@ OWASP: A03 Injection. A site that is not PHP keeps the set: the payloads say wha
 **PHP open tag in a parameter**
 
 - Set `php`, phase `head`
+- Number `933100` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `cookies`, `body`
 - Transformations: `url_decode`, `remove_nulls`, `lowercase`, `compress_whitespace`
 - Operator: `contains_any`: `<?php`, `<?=`
@@ -745,6 +779,7 @@ does not match.
 **PHP function that runs code, commands or files, called in a parameter**
 
 - Set `php`, phase `head`
+- Number `933110` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `cookies`, `body`
 - Transformations: `url_decode`, `remove_nulls`, `lowercase`, `compress_whitespace`
 - Operator: `contains_any`: `eval(`, `system(`, `passthru(`, `shell_exec(`, `exec(`, `popen(`, `proc_open(`, `assert(`, `create_function(`, `include(`, `require(`, `file_get_contents(`, `file_put_contents(`, `unserialize(`
@@ -763,6 +798,7 @@ forum excludes its text fields.
 **preg_replace with the /e modifier**
 
 - Set `php`, phase `head`
+- Number `933115` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `cookies`, `body`
 - Transformations: `url_decode`, `remove_nulls`, `lowercase`, `compress_whitespace`
 - Operator: `regex`:
@@ -784,6 +820,7 @@ developer site matches honestly.
 **PHP stream wrapper in a parameter**
 
 - Set `php`, phase `head`
+- Number `933120` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `args_names`, `cookies`, `headers.referer`, `path`
 - Transformations: `url_decode`, `remove_nulls`, `lowercase`, `compress_whitespace`
 - Operator: `contains_any`: `php://`, `phar://`, `data:`, `expect://`, `zip://`, `glob://`
@@ -802,6 +839,7 @@ export) sends `data:image/png;base64,...` honestly, and is excluded by target.
 **PHP ini directive name in a parameter**
 
 - Set `php`, phase `head`
+- Number `933130` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `args_names`, `cookies`, `body`
 - Transformations: `url_decode`, `remove_nulls`, `lowercase`, `compress_whitespace`
 - Operator: `contains_any`: `allow_url_include`, `auto_prepend_file`, `auto_append_file`, `disable_functions`, `open_basedir`
@@ -819,6 +857,7 @@ searches.
 **Serialized PHP object or array in a parameter**
 
 - Set `php`, phase `head`
+- Number `933140` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `cookies`, `body`
 - Transformations: `url_decode`, `remove_nulls`, `lowercase`, `compress_whitespace`
 - Operator: `regex`:
@@ -841,6 +880,7 @@ those are excluded by target (`targets: [cookies.<name>]`).
 **.php followed by path info (/a.php/b)**
 
 - Set `php`, phase `head`
+- Number `933150` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `path`
 - Transformations: `lowercase`
 - Operator: `regex`:
@@ -888,6 +928,7 @@ OWASP: A03 Injection.
 **SQL statement in a parameter (union select, insert into, drop table, into outfile)**
 
 - Set `sqli`, phase `head`
+- Number `942100` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `cookies`, `body`
 - Transformations: `url_decode`, `remove_nulls`, `lowercase`, `remove_comments`, `compress_whitespace`
 - Operator: `contains_any`: `union select`, `union all select`, `insert into`, `drop table`, `into outfile`
@@ -906,6 +947,7 @@ honestly, and excludes the rule on those parameters.
 **select ... from in a parameter**
 
 - Set `sqli`, phase `head`
+- Number `942110` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `cookies`, `body`
 - Transformations: `url_decode`, `remove_nulls`, `lowercase`, `remove_comments`, `compress_whitespace`
 - Operator: `regex`:
@@ -930,6 +972,7 @@ such as a quote trick.
 **SQL function for timing, files or the system (sleep, benchmark, load_file, xp_cmdshell)**
 
 - Set `sqli`, phase `head`
+- Number `942120` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `cookies`, `body`
 - Transformations: `url_decode`, `remove_nulls`, `lowercase`, `remove_comments`, `compress_whitespace`
 - Operator: `contains_any`: `sleep(`, `benchmark(`, `pg_sleep(`, `waitfor delay`, `information_schema`, `load_file(`, `xp_cmdshell`, `@@version`
@@ -947,6 +990,7 @@ a site about databases.
 **SQL tautology (' or ', or 1=1, and 1=1)**
 
 - Set `sqli`, phase `head`
+- Number `942130` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `cookies`, `body`
 - Transformations: `url_decode`, `remove_nulls`, `lowercase`, `remove_comments`, `compress_whitespace`
 - Operator: `contains_any`: `' or '`, `" or "`, `or 1=1`, `and 1=1`, `' or 1`, `" or 1`
@@ -963,6 +1007,7 @@ authentication bypass and the boolean probe. High: quoted alternatives in prose 
 **SQL comment after a quote or a semicolon, or a MySQL version comment (/*!)**
 
 - Set `sqli`, phase `head`
+- Number `942140` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `cookies`, `body`
 - Transformations: `url_decode`, `remove_nulls`, `lowercase`, `compress_whitespace`
 - Operator: `contains_any`: `'--`, `"--`, `' --`, `" --`, `;--`, `; --`, `/*!`
@@ -980,6 +1025,7 @@ hit.
 **char() or concat() with a quote, or a hex literal with a quote**
 
 - Set `sqli`, phase `head`
+- Number `942150` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `cookies`, `body`
 - Transformations: `url_decode`, `remove_nulls`, `lowercase`, `remove_comments`, `compress_whitespace`
 - Operator: `regex`:
@@ -1001,6 +1047,7 @@ code snippets and spreadsheet formulas have it, so it only adds to other hits.
 **Stacked SQL statement (; drop, ; delete, ; update, ; insert)**
 
 - Set `sqli`, phase `head`
+- Number `942160` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `cookies`, `body`
 - Transformations: `url_decode`, `remove_nulls`, `lowercase`, `remove_comments`, `compress_whitespace`
 - Operator: `regex`:
@@ -1022,6 +1069,7 @@ after the one the value was put into. Prose with a semicolon before one of the w
 **SQL injection (libinjection)**
 
 - Set `sqli`, phase `head`
+- Number `942170` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `args_names`, `cookies`, `cookies_names`, `body.json`
 - Transformations: `url_decode`, `remove_nulls`, `lowercase`, `compress_whitespace`
 - Operator: `detect_sqli` (libinjection's SQL injection detector)
@@ -1042,6 +1090,7 @@ misjudges is excluded by target, or the rule's score lowered by `override`.
 **SQL procedure analyse or a stacked shutdown**
 
 - Set `sqli`, phase `head`
+- Number `942180` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `cookies`, `body`
 - Transformations: `url_decode`, `remove_nulls`, `lowercase`, `remove_comments`, `compress_whitespace`
 - Operator: `regex`:
@@ -1065,6 +1114,7 @@ not match.
 **Quote closed by a SQL comment at the end of a value (admin' #, admin'/*)**
 
 - Set `sqli`, phase `head`
+- Number `942190` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `cookies`, `body`
 - Transformations: `url_decode`, `remove_nulls`, `lowercase`, `compress_whitespace`
 - Operator: `regex`:
@@ -1087,6 +1137,7 @@ that really ends in a quote and a dash or hash ("say 'hi' --") is the rare false
 **Numeric SQL tautology as the whole value (1 or true, -1 or 2>1, 1 and 1=1)**
 
 - Set `sqli`, phase `head`
+- Number `942200` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `cookies`, `body`
 - Transformations: `url_decode`, `remove_nulls`, `lowercase`, `remove_comments`, `compress_whitespace`
 - Operator: `regex`:
@@ -1132,6 +1183,7 @@ OWASP: A03 Injection.
 **HTML tag that runs or embeds script (script, svg, iframe, object, embed, meta http-equiv)**
 
 - Set `xss`, phase `head`
+- Number `941100` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `cookies`, `body`
 - Transformations: `url_decode`, `html_decode`, `js_decode`, `remove_nulls`, `lowercase`, `compress_whitespace`
 - Operator: `contains_any`: `<script`, `</script`, `<svg`, `<iframe`, `<object`, `<embed`, `<meta http-equiv`, `<img src=x onerror`
@@ -1150,6 +1202,7 @@ sanitized by the application.
 **Script scheme (javascript:, vbscript:, data:text/html)**
 
 - Set `xss`, phase `head`
+- Number `941110` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `cookies`, `body`
 - Transformations: `url_decode`, `html_decode`, `js_decode`, `remove_nulls`, `lowercase`, `compress_whitespace`
 - Operator: `contains_any`: `javascript:`, `vbscript:`, `data:text/html`
@@ -1167,6 +1220,7 @@ happens.
 **Event handler attribute (onload=, onerror=, onmouseover=, ...)**
 
 - Set `xss`, phase `head`
+- Number `941120` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `cookies`, `body`
 - Transformations: `url_decode`, `html_decode`, `js_decode`, `remove_nulls`, `lowercase`, `compress_whitespace`
 - Operator: `regex`:
@@ -1189,6 +1243,7 @@ filtered. High, so it refuses with a second hit; a value of code or a query lang
 **Script payload reaching for the document, the location or an encoder**
 
 - Set `xss`, phase `head`
+- Number `941130` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `cookies`, `body`
 - Transformations: `url_decode`, `html_decode`, `js_decode`, `remove_nulls`, `lowercase`, `compress_whitespace`
 - Operator: `contains_any`: `document.cookie`, `document.location`, `window.location`, `string.fromcharcode`, `expression(`
@@ -1206,6 +1261,7 @@ alone does not refuse.
 **eval( or alert( in a parameter**
 
 - Set `xss`, phase `head`
+- Number `941140` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `cookies`, `body`
 - Transformations: `url_decode`, `html_decode`, `js_decode`, `remove_nulls`, `lowercase`, `compress_whitespace`
 - Operator: `contains_any`: `eval(`, `alert(`
@@ -1221,6 +1277,7 @@ in a text field has it), and medium severity: it only adds to the other rules' h
 **XSS (libinjection)**
 
 - Set `xss`, phase `head`
+- Number `941150` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `args_names`, `cookies`, `cookies_names`, `body.json`, `ua`, `headers.referer`
 - Transformations: `url_decode`, `html_decode`, `js_decode`, `remove_nulls`, `lowercase`, `compress_whitespace`
 - Operator: `detect_xss` (libinjection's XSS detector)
@@ -1240,6 +1297,7 @@ rich-text field is excluded by target as for wf-941-100.
 **HTML tag split by another tag (<scr<script>ipt>)**
 
 - Set `xss`, phase `head`
+- Number `941160` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `cookies`, `body`
 - Transformations: `url_decode`, `html_decode`, `js_decode`, `remove_nulls`, `lowercase`, `compress_whitespace`
 - Operator: `regex`:
@@ -1263,6 +1321,7 @@ site, which excludes its code fields by target.
 **Script scheme broken up by control characters or spaces (jav&#x09;ascript:)**
 
 - Set `xss`, phase `head`
+- Number `941170` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `cookies`, `body`
 - Transformations: `url_decode`, `html_decode`, `js_decode`, `remove_nulls`, `lowercase`
 - Operator: `regex`:
@@ -1299,6 +1358,7 @@ OWASP: A03 Injection.
 **Template expression with a call inside ({{ ( }}, ${ ( }, #{ ( }, <% ( %>)**
 
 - Set `template`, phase `head`
+- Number `944100` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `cookies`, `body`
 - Transformations: `url_decode`, `remove_nulls`, `lowercase`, `compress_whitespace`
 - Operator: `regex`:
@@ -1321,6 +1381,7 @@ function calls is the false positive, and excludes its template fields by target
 **Template engine internals (__class__, __globals__, mro(), lipsum, T(java.lang, freemarker, #set()**
 
 - Set `template`, phase `head`
+- Number `944110` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `cookies`, `body`
 - Transformations: `url_decode`, `remove_nulls`, `lowercase`, `compress_whitespace`
 - Operator: `contains_any`: `__class__`, `__globals__`, `__import__`, `__subclasses__`, `mro(`, `lipsum.`, `cycler.`, `joiner.`, `t(java.lang`, `freemarker`, `#set(`
@@ -1338,6 +1399,7 @@ Python and Java developer content names them; such a site excludes its code fiel
 **JNDI lookup (${jndi:) in a parameter, header or the path**
 
 - Set `template`, phase `head`
+- Number `944120` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `cookies`, `headers`, `path_raw`, `body`
 - Transformations: `url_decode`, `remove_nulls`, `lowercase`, `compress_whitespace`
 - Operator: `contains_any`: `${jndi:`
@@ -1378,6 +1440,7 @@ its own `upload.ext` rule with `action: block` on everything not in its list
 **Upload file name with a path separator, .., a null or a control character**
 
 - Set `upload`, phase `upload`
+- Number `960100` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `upload.filename`
 - Transformations: `url_decode`
 - Operator: `contains_any`: `/`, `\`, `..`, `\x00`, `\x01`, `\x02`, `\x03`, `\x04`, `\x05`, `\x06`, `\x07`, `\x08`, `\x09`, `\x0a`, `\x0b`, `\x0c`, `\x0d`, `\x0e`, `\x0f`, `\x10`, `\x11`, `\x12`, `\x13`, `\x14`, `\x15`, `\x16`, `\x17`, `\x18`, `\x19`, `\x1a`, `\x1b`, `\x1c`, `\x1d`, `\x1e`, `\x1f`, `\x7f`
@@ -1395,6 +1458,7 @@ historical false positive.
 **Upload file name over 255 bytes**
 
 - Set `upload`, phase `upload`
+- Number `960105` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `upload.filename`
 - Transformations: none
 - Operator: `length_gt: 255`
@@ -1411,6 +1475,7 @@ document title in a non-Latin script, three bytes a character) adds only this.
 **Executable extension in an uploaded file's name**
 
 - Set `upload`, phase `upload`
+- Number `960110` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `upload.ext`
 - Transformations: `url_decode`, `remove_nulls`, `lowercase`
 - Operator: `regex`:
@@ -1434,6 +1499,7 @@ software repository, a CI artifact upload) excludes the rule on that endpoint.
 **Server configuration file uploaded (.htaccess, .user.ini, web.config, php.ini)**
 
 - Set `upload`, phase `upload`
+- Number `960120` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `upload.filename`
 - Transformations: `url_decode`, `remove_nulls`, `lowercase`
 - Operator: `equals_any`: `.htaccess`, `.user.ini`, `web.config`, `php.ini`
@@ -1450,6 +1516,7 @@ upload has these names.
 **Uploaded part declared as a PHP or shell script**
 
 - Set `upload`, phase `upload`
+- Number `960130` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `upload.type`
 - Transformations: `lowercase`, `compress_whitespace`
 - Operator: `contains_any`: `application/x-php`, `application/x-httpd-php`, `text/x-php`, `application/x-sh`
@@ -1466,6 +1533,7 @@ what it sends. A code-hosting upload is the exception, excluded by path.
 **Uploaded file starts with a PHP tag or a shebang (a polyglot when declared an image or document)**
 
 - Set `upload`, phase `upload`
+- Number `960140` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `upload.head`
 - Transformations: none
 - Operator: `magic_is`: `php`, `script`
@@ -1483,6 +1551,7 @@ second hit when the file pretends to be an image.
 **Uploaded file declared an image or PDF whose bytes are not one**
 
 - Set `upload`, phase `upload`
+- Number `960150` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `upload.head`
 - Transformations: none
 - Operator: `magic_not`: `png`, `jpeg`, `gif`, `webp`, `pdf`
@@ -1500,6 +1569,7 @@ matches too; high, so it refuses only with another hit.
 **More than 64 file parts in a multipart body**
 
 - Set `upload`, phase `upload`
+- Number `960160` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `upload.count`
 - Transformations: none
 - Operator: `gt: 64`
@@ -1535,6 +1605,7 @@ messages are written by the runtimes, not by people.
 **PHP error or exception text in the response**
 
 - Set `leakage`, phase `response`
+- Number `950100` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `response.body`
 - Transformations: none
 - Operator: `contains_any`: `Fatal error:`, `Parse error:`, `Stack trace:`, `Uncaught Exception`, `Uncaught Error`
@@ -1553,6 +1624,7 @@ path.
 **PHP warning with the file and line in the response**
 
 - Set `leakage`, phase `response`
+- Number `950110` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `response.body`
 - Transformations: none
 - Operator: `regex`:
@@ -1574,6 +1646,7 @@ such warnings are the false positive.
 **Java or Python stack trace in the response**
 
 - Set `leakage`, phase `response`
+- Number `950120` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `response.body`
 - Transformations: none
 - Operator: `contains_any`: `at java.`, `Traceback (most recent call last)`
@@ -1590,6 +1663,7 @@ developer blog or an issue tracker that shows traces is excluded by path.
 **Database error message in the response**
 
 - Set `leakage`, phase `response`
+- Number `950130` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `response.body`
 - Transformations: none
 - Operator: `contains_any`: `SQLSTATE[`, `You have an error in your SQL syntax`, `Microsoft OLE DB`, `ODBC Driver`
@@ -1606,6 +1680,7 @@ feedback away. Pages about databases that quote these errors are the false posit
 **Oracle error code (ORA-nnnnn) in the response**
 
 - Set `leakage`, phase `response`
+- Number `950140` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `response.body`
 - Transformations: none
 - Operator: `regex`:
@@ -1627,6 +1702,7 @@ the rare false positive.
 **Directory listing in the response**
 
 - Set `leakage`, phase `response`
+- Number `950150` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `response.body`
 - Transformations: none
 - Operator: `contains_any`: `<title>Index of /`, `Directory listing for`
@@ -1644,6 +1720,7 @@ path.
 **Server header with a full version**
 
 - Set `leakage`, phase `response`
+- Number `950900` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `response.headers.server`
 - Transformations: none
 - Operator: `regex`:
@@ -1700,6 +1777,7 @@ OWASP: A06 Vulnerable and Outdated Components.
 **Shellshock: a bash function definition at the start of a header or parameter (CVE-2014-6271)**
 
 - Set `cve`, phase `head`
+- Number `20140006271` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `headers`, `args`
 - Transformations: `url_decode`
 - Operator: `regex`:
@@ -1723,6 +1801,7 @@ form sends that; the risk of a false positive is negligible.
 **Apache Struts 2 OGNL in the Content-Type (CVE-2017-5638)**
 
 - Set `cve`, phase `head`
+- Number `20170005638` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `headers.content-type`
 - Transformations: none
 - Operator: `contains_any`: `%{`, `${`
@@ -1740,6 +1819,7 @@ rule matches `%{` or `${` in the Content-Type, which no media type has.
 **PHPUnit eval-stdin.php reached over HTTP (CVE-2017-9841)**
 
 - Set `cve`, phase `head`
+- Number `20170009841` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `path`
 - Transformations: `lowercase`
 - Operator: `contains_any`: `/util/php/eval-stdin.php`
@@ -1759,6 +1839,7 @@ purpose.
 **Drupalgeddon2: a render array property as a parameter name (CVE-2018-7600)**
 
 - Set `cve`, phase `head`
+- Number `20180007600` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args_names`
 - Transformations: `url_decode`, `lowercase`
 - Operator: `contains_any`: `#post_render`, `#pre_render`, `#lazy_builder`, `#access_callback`, `#markup`
@@ -1777,6 +1858,7 @@ Browsers never send `#` in a form field's name (Drupal's own forms do not either
 **Fortinet FortiOS SSL VPN path traversal in fgt_lang (CVE-2018-13379)**
 
 - Set `cve`, phase `head`
+- Number `20180013379` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args.lang`
 - Transformations: `url_decode`, `lowercase`
 - Operator: `contains_any`: `/dev/cmdb/`, `sslvpn_websession`
@@ -1795,6 +1877,7 @@ by the traversal set.
 **ThinkPHP invokefunction through the router (CVE-2018-20062)**
 
 - Set `cve`, phase `head`
+- Number `20180020062` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `path_raw`
 - Transformations: `url_decode`, `lowercase`
 - Operator: `regex`:
@@ -1818,6 +1901,7 @@ a controller path no honest link has.
 **Citrix ADC / Gateway path traversal to /vpns/ (CVE-2019-19781)**
 
 - Set `cve`, phase `head`
+- Number `20190019781` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `path_raw`
 - Transformations: `url_decode`, `lowercase`
 - Operator: `contains_any`: `../vpns/`, `..\vpns/`
@@ -1836,6 +1920,7 @@ request has it.
 **F5 BIG-IP TMUI path traversal (..;/ after /tmui/) (CVE-2020-5902)**
 
 - Set `cve`, phase `head`
+- Number `20200005902` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `path_raw`
 - Transformations: `url_decode`, `lowercase`
 - Operator: `regex`:
@@ -1858,6 +1943,7 @@ the path. The traversal set's wf-930-100 also scores `..;/` anywhere.
 **Microsoft Exchange ProxyShell / ProxyNotShell autodiscover SSRF (CVE-2021-34473, CVE-2022-41040)**
 
 - Set `cve`, phase `head`
+- Number `20210034473` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`
 - Transformations: `url_decode`, `lowercase`
 - Operator: `contains_any`: `autodiscover.json?@`
@@ -1877,6 +1963,7 @@ ProxyNotShell, 2022, the same request with `PowerShell` as the protocol). The ru
 **Apache HTTP Server 2.4.49 path traversal with an encoded dot (CVE-2021-41773)**
 
 - Set `cve`, phase `head`
+- Number `20210041773` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `path_raw`
 - Transformations: `lowercase`
 - Operator: `contains_any`: `/.%2e/`, `/%2e./`, `/%2e%2e/`
@@ -1895,6 +1982,7 @@ an unreserved character; the false-positive risk is negligible.
 **Apache HTTP Server 2.4.50 path traversal with a double-encoded dot (CVE-2021-42013)**
 
 - Set `cve`, phase `head`
+- Number `20210042013` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `path_raw`
 - Transformations: `lowercase`
 - Operator: `contains_any`: `%%32%65`, `%%32e`, `%2%65`
@@ -1912,6 +2000,7 @@ which are not even valid percent-encoding: no client produces them.
 **F5 BIG-IP iControl REST command endpoint (/mgmt/tm/util/bash) (CVE-2022-1388)**
 
 - Set `cve`, phase `head`
+- Number `20220001388` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `path`
 - Transformations: `lowercase`
 - Operator: `contains_any`: `/mgmt/tm/util/bash`
@@ -1931,6 +2020,7 @@ proxy it for its administrators excludes the rule on `/mgmt/*`.
 **Spring Cloud Function routing expression header (CVE-2022-22963)**
 
 - Set `cve`, phase `head`
+- Number `20220022963` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `headers.spring.cloud.function.routing-expression`
 - Transformations: none
 - Operator: `exists`
@@ -1950,6 +2040,7 @@ it is excluded by path.
 **Spring4Shell: class.module.classLoader in a parameter name (CVE-2022-22965)**
 
 - Set `cve`, phase `head`
+- Number `20220022965` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args_names`
 - Transformations: `url_decode`, `lowercase`
 - Operator: `contains_any`: `class.module.classloader`
@@ -1969,6 +2060,7 @@ field is named so.
 **Atlassian Confluence OGNL injection in the path (CVE-2022-26134)**
 
 - Set `cve`, phase `head`
+- Number `20220026134` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `path_raw`
 - Transformations: `url_decode`, `lowercase`
 - Operator: `regex`:
@@ -1993,6 +2085,7 @@ A front end that requests an unfilled template literally (`/user/${id}`) has no 
 **Text4Shell: Apache Commons Text script, dns or url lookup (CVE-2022-42889)**
 
 - Set `cve`, phase `head`
+- Number `20220042889` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `cookies`, `headers`, `body`
 - Transformations: `url_decode`, `remove_nulls`, `lowercase`, `compress_whitespace`
 - Operator: `contains_any`: `${script:`, `${dns:`, `${url:`
@@ -2011,6 +2104,7 @@ Template syntax of this form is not in honest values.
 **Ivanti Connect Secure authentication bypass through /api/v1/totp/user-backup-code/../ (CVE-2023-46805, CVE-2024-21887)**
 
 - Set `cve`, phase `head`
+- Number `20230046805` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `path_raw`
 - Transformations: `url_decode`, `lowercase`
 - Operator: `contains_any`: `/api/v1/totp/user-backup-code/..`
@@ -2029,6 +2123,7 @@ traversal out of the backup-code prefix in the path as sent.
 **PAN-OS GlobalProtect SESSID cookie with a traversal or a command (CVE-2024-3400)**
 
 - Set `cve`, phase `head`
+- Number `20240003400` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `cookies.SESSID`
 - Transformations: `url_decode`, `lowercase`
 - Operator: `contains_any`: `../`, `..\`, `` ` ``, `$(`, `${ifs}`
@@ -2047,6 +2142,7 @@ id is hex or base64.
 **PHP-CGI argument injection through the query (CVE-2024-4577, CVE-2012-1823)**
 
 - Set `cve`, phase `head`
+- Number `20240004577` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `query`
 - Transformations: `lowercase`
 - Operator: `regex`:
@@ -2070,6 +2166,7 @@ directives these exploits set, in the query as sent.
 **GeoServer property name evaluated as code (exec(java.lang.Runtime) (CVE-2024-36401)**
 
 - Set `cve`, phase `head`
+- Number `20240036401` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `args`, `body`
 - Transformations: `url_decode`, `lowercase`, `compress_whitespace`
 - Operator: `contains_any`: `exec(java.lang.runtime`
@@ -2088,6 +2185,7 @@ the body; a feature property is never called so.
 **Next.js middleware bypass: x-middleware-subrequest from a client (CVE-2025-29927)**
 
 - Set `cve`, phase `head`
+- Number `20250029927` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
 - Targets: `headers.x-middleware-subrequest`
 - Transformations: none
 - Operator: `exists`

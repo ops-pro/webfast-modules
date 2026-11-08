@@ -6,7 +6,7 @@ The filter's second release: a fix for requests with a parameter or a cookie wit
 made the head phase panic; libinjection's SQL injection and XSS detectors as operators and two
 built-in rules on them, and rules for what they let through; a `cve` set; every rule's severity,
 confidence, tags, CWE and CVE references and description, in the log and in a generated reference;
-a query's `+` read as a space; the response phase streaming a 200 instead of holding it; the staged
+a number for each rule and test markers in the log, for go-ftw; a query's `+` read as a space; the response phase streaming a 200 instead of holding it; the staged
 checks of webfast-core handing the head's state to the body by value; and fewer allocations on the
 body path. The webfast binary takes the detectors only when its `ngfw` feature names
 `webfast-ngfw/libinjection` (it pulls the crate without its default features).
@@ -32,6 +32,13 @@ body path. The webfast binary takes the detectors only when its `ngfw` feature n
   `UPDATE_RULES_DOC=1` writes it again.
 - **`rules.disable_tags`**: every rule with one of the tags is left out (`disable_tags:
   [wordpress]`), after `disable`; a tag no rule has is a warning.
+- **A number for each rule, and go-ftw's markers** (docs/ngfw.md "The log"): a built-in rule's
+  hit names its number as `ruleId`, made from the id and stored nowhere (`wf-942-190` is 942190,
+  `wf-cve-2022-22965` is 20220022965; two rules for one number do not load), as go-ftw, the OWASP
+  CRS test runner, reads rules by number from a JSON log line; the reference lists each rule's.
+  `log.test_marker: X-CRS-Test` (off by default) writes a request's value of the header as a
+  marker line, which go-ftw sends before and after each test; the marked request is checked as
+  any other (a probe with the header is refused as without it, a test).
 - **The `cve` set**: 21 rules, `wf-cve-<year>-<number>`, each blocking the narrow request
   signature of a known, exploited vulnerability of a web product — Shellshock, Apache Struts 2,
   PHPUnit eval-stdin, Drupalgeddon2, FortiOS, ThinkPHP, Citrix ADC, F5 BIG-IP TMUI and iControl

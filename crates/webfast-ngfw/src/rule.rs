@@ -586,6 +586,39 @@ fn asn_list<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<u32
         .collect()
 }
 
+/// The number a rule id stands for, made from the id and stored nowhere: what test tools that
+/// know rules by number (go-ftw's `rule_id` and `expect_ids`) and the log's `ruleId` use. Fixed by
+/// the id alone, so a test that names it stays right:
+/// - `wf-942-190` → 942190 (the six digits, as CRS numbers its rules);
+/// - `wf-cve-2022-22965` → 20220022965 (the year, then the CVE's number in seven digits);
+///   `wf-cve-…-b` to `-j`, a second to tenth rule for one CVE, adds 1 to 9 hundred billion.
+///
+/// Any other id (a site's own rules may be named freely) has none.
+pub fn number_of(id: &str) -> Option<u64> {
+    let digits = |s: &str, n: usize| s.len() == n && s.bytes().all(|b| b.is_ascii_digit());
+    let rest = id.strip_prefix("wf-")?;
+    if let Some(cve) = rest.strip_prefix("cve-") {
+        let mut parts = cve.split('-');
+        let (year, number, suffix) = (parts.next()?, parts.next()?, parts.next());
+        if parts.next().is_some()
+            || !digits(year, 4)
+            || !(4..=7).contains(&number.len())
+            || !digits(number, number.len())
+        {
+            return None;
+        }
+        let extra = match suffix {
+            None => 0,
+            Some(s) if s.len() == 1 && (b'b'..=b'j').contains(&s.as_bytes()[0]) => u64::from(s.as_bytes()[0] - b'a'),
+            Some(_) => return None,
+        };
+        let (year, number): (u64, u64) = (year.parse().ok()?, number.parse().ok()?);
+        return Some(extra * 100_000_000_000 + year * 10_000_000 + number);
+    }
+    let (section, rule) = rest.split_once('-')?;
+    (digits(section, 3) && digits(rule, 3)).then(|| format!("{section}{rule}").parse().ok())?
+}
+
 /// `AS12345` or `12345`.
 pub fn parse_asn(text: &str) -> Result<u32, String> {
     let digits = text.trim();
@@ -635,6 +668,28 @@ impl fmt::Display for IdPattern {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_rule_id_stands_for_its_number() {
+        assert_eq!(number_of("wf-942-190"), Some(942_190));
+        assert_eq!(number_of("wf-913-100"), Some(913_100));
+        assert_eq!(number_of("wf-cve-2022-22965"), Some(20_220_022_965));
+        assert_eq!(number_of("wf-cve-2014-6271"), Some(20_140_006_271));
+        assert_eq!(number_of("wf-cve-2024-1234567"), Some(20_241_234_567));
+        assert_eq!(number_of("wf-cve-2021-41773-b"), Some(120_210_041_773));
+        for none in [
+            "site-rule",
+            "wf-94-190",
+            "wf-942-1900",
+            "wf-cve-22-1",
+            "wf-cve-2022-123",
+            "wf-cve-2022-1-a",
+            "wf-cve-2022-1234-k",
+            "xx-942-190",
+        ] {
+            assert_eq!(number_of(none), None, "{none}");
+        }
+    }
 
     #[test]
     fn targets_parse_from_their_text_and_print_back() {

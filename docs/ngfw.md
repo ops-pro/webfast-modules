@@ -52,6 +52,7 @@ log:
   output: /var/log/web/ngfw.log   # stdout | stderr | discard | a file, relative to this file
   matched: 200                    # bytes of the matched text written per hit; 0: none
   passed: false                   # also write requests that scored but stayed under the threshold
+  test_marker: X-CRS-Test         # off by default: a request with this header also writes a marker line (go-ftw)
 threshold: 5                      # the sum of scores from which a request is refused
 response:
   status: 403                     # 403 | 404 | 444 (444: the connection is closed, nothing sent)
@@ -477,6 +478,30 @@ One JSON line per event through the core's `webfast_core::eventlog`, extended wi
 Each hit names the rule's `severity`, `tags`, and its `confidence` and `refs` (only the lists
 that are not empty) when it has them, so a SIEM selects by CWE, CVE or OWASP category without a
 table of rule ids.
+
+**Rule numbers.** A built-in rule's hit also names its number as `ruleId`, made from the id and
+stored nowhere: `wf-942-190` is 942190, `wf-cve-2022-22965` is 20220022965 (the year, then the
+CVE's number in seven digits; a second rule for one CVE, `-b` to `-j`, adds 1 to 9 hundred
+billion). It is fixed by the id, so a test that names it stays right; two rules that would
+stand for one number do not load. A site's own rule named otherwise has none. The reference
+lists each rule's number. Tools that know rules by number read it: go-ftw, the OWASP CRS test
+runner, takes `ruleId` from a JSON log line for its `rule_id` and `expect_ids`.
+
+**Test markers.** With `log.test_marker: X-CRS-Test`, a request that carries the header also
+writes a line `{"msg":"test marker","marker_header":"x-crs-test","marker":"<value>",…}` with the
+header's value; go-ftw sends such a request before and after each test and reads the lines
+between the two. The marked request is checked as any other (a probe with the header is
+refused as without it). Off by default; it is for a test deployment, where the log's batches
+should be short (`WEB_LOG_FLUSH_MS`, 10 ms by default).
+
+`decision`: `block`, `ban`, `log_only` (would have refused), `scored` (with `log.passed`: under the
+threshold), `access` (refused by `access`, with `reason`: `country`, `asn`, `ip`, `ban`,
+`honeypot`), `leak` (response phase), `challenge` (answered with the browser challenge; `status`
+503 or 302; `reason` `country`, `asn` or `ban` when `access` asked, none for a rule, whose `hits`
+are written), `challenge_passed` (a challenge was due and the client had passed it: let through,
+`status` 0). `matched` is cut to `log.matched` bytes and JSON-escaped;
+values of parameters the JWT check hides stay hidden. A refused request is also in the site's
+access log as any other.
 
 ## Performance
 

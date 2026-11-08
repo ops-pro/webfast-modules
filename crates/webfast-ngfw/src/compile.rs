@@ -26,6 +26,8 @@ use webfast_core::matcher::PathPattern;
 /// A rule ready to run.
 pub struct CompiledRule {
     pub id: String,
+    /// What the id stands for as a number (`rule::number_of`), written as the log's `ruleId`.
+    pub number: Option<u64>,
     pub set: String,
     pub msg: String,
     pub phase: Phase,
@@ -615,8 +617,15 @@ pub fn compile(rules: &[Sourced], mode: Mode, exclusions: &[ExclusionConfig]) ->
                 plans[plan].chains[chain].per_value.push(index as u32);
             }
         }
+        let number = crate::rule::number_of(&rule.id);
+        if let Some(n) = number
+            && let Some(other) = compiled.iter().find(|r| r.number == Some(n))
+        {
+            bail!("rules {} and {of} stand for the same number {n}", other.id);
+        }
         compiled.push(CompiledRule {
             id: rule.id.clone(),
+            number,
             set,
             msg: rule.msg.clone().unwrap_or_else(|| rule.id.clone()),
             phase: rule.phase,

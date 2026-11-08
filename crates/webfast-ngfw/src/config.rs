@@ -51,6 +51,10 @@ pub struct LogConfig {
     /// Also write requests that scored but stayed under the threshold.
     #[serde(default)]
     pub passed: bool,
+    /// For a test deployment: a request with this header (go-ftw's `X-CRS-Test`) also writes its
+    /// value as a marker line; it is checked as any other. Off by default.
+    #[serde(default)]
+    pub test_marker: Option<String>,
 }
 
 fn two_hundred() -> usize {

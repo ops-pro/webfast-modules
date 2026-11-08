@@ -250,6 +250,12 @@ fn section(out: &mut String, rule: &Rule) {
         rule.set.as_deref().unwrap_or("site"),
         rule.phase.name()
     );
+    if let Some(number) = crate::rule::number_of(&rule.id) {
+        let _ = writeln!(
+            out,
+            "- Number `{number}` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)"
+        );
+    }
     let targets: Vec<String> = rule.targets.iter().map(ToString::to_string).collect();
     if !targets.is_empty() {
         let _ = writeln!(out, "- Targets: {}", codes(&targets));

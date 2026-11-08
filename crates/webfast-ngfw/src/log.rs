@@ -134,7 +134,12 @@ pub fn write(log: &EventLog, compiled: &Compiled, record: &Record<'_>) {
                 }
                 line.push_str(r#"{"id":""#);
                 json_escape(line, &rule.id);
-                line.push_str(r#"","set":""#);
+                line.push('"');
+                if let Some(number) = rule.number {
+                    // The rule by number, where test tools look for it (go-ftw's `ruleId`).
+                    let _ = write!(line, r#","ruleId":{number}"#);
+                }
+                line.push_str(r#","set":""#);
                 json_escape(line, &rule.set);
                 let _ = write!(
                     line,
@@ -311,13 +316,13 @@ mod tests {
         assert_eq!(
             line["hits"],
             serde_json::json!([
-                {"id": "wf-960-110", "set": "upload", "score": 5, "severity": "critical", "confidence": "high",
+                {"id": "wf-960-110", "ruleId": 960110, "set": "upload", "score": 5, "severity": "critical", "confidence": "high",
                  "tags": ["OWASP_A04", "upload"], "refs": {"cwe": ["CWE-434"], "crs": [933110]},
                  "target": "upload.ext", "matched": "php"},
                 {"id": "plain", "set": "site", "score": 3, "severity": "medium", "tags": [],
                  "target": "upload.ext", "matched": "exe"}
             ]),
-            "the refs' empty lists left out, no refs or confidence when the rule has none"
+            "the refs' empty lists left out, no refs, confidence or number when the rule has none"
         );
         let line: serde_json::Value = serde_json::from_str(lines.next().unwrap()).unwrap();
         assert_eq!(line["decision"], "access");
