@@ -1,85 +1,138 @@
-# Set `sqli` (wf-942-*): SQL injection. Statements and keywords no form value needs, the
-# time-based and file functions, tautologies, comment and quote tricks, stacked statements. On
-# parameter values and cookies, after `url_decode remove_nulls lowercase remove_comments
-# compress_whitespace` (wf-942-140 keeps the comments to see them); wf-942-170 is libinjection's
-# detector on what its prefilter lets through (the `libinjection` feature; left out without it).
-# OWASP: A03 Injection.
+doc: |
+  Set `sqli` (wf-942-*): SQL injection. Statements and keywords no form value needs, the
+  time-based and file functions, tautologies, comment and quote tricks, stacked statements,
+  MySQL's `procedure analyse` and `shutdown`, a quote closed by a comment at the end of a value,
+  a numeric tautology as a whole value. On parameter values and cookies, after `url_decode
+  remove_nulls lowercase remove_comments compress_whitespace` (wf-942-140 and wf-942-190 keep the
+  comments to see them); wf-942-170 is libinjection's detector on what its prefilter lets
+  through (the `libinjection` feature; left out without it).
+  OWASP: A03 Injection.
 rules:
   - id: wf-942-100
     set: sqli
     phase: head
     msg: "SQL statement in a parameter (union select, insert into, drop table, into outfile)"
     severity: critical
+    confidence: high
     targets: [args, cookies, body]
     transform: [url_decode, remove_nulls, lowercase, remove_comments, compress_whitespace]
     operator: { contains_any: ['union select', 'union all select', 'insert into', 'drop table', 'into outfile'] }
     tags: [OWASP_A03, injection, sqli]
+    refs: { cwe: [CWE-89], capec: [CAPEC-66] }
+    doc: |
+      `union select`, `union all select`, `insert into`, `drop table` or `into outfile`, after
+      comments are removed and whitespace compressed (so `UNION/**/SELECT` is seen): the core of
+      a data-extracting or destructive injection. Critical: one hit refuses. A database course,
+      a SQL tutorial's search box or a query builder that sends SQL in parameters hits it
+      honestly, and excludes the rule on those parameters.
 
   - id: wf-942-110
     set: sqli
     phase: head
     msg: "select ... from in a parameter"
     severity: high
+    confidence: medium
     targets: [args, cookies, body]
     transform: [url_decode, remove_nulls, lowercase, remove_comments, compress_whitespace]
     prefilter: ['select ']
-    operator: { regex: '(?:^|[^a-z0-9_])select .{1,200}?(?:^|[^a-z0-9_])from(?:[^a-z0-9_]|$)' }
+    operator:
+      regex: '(?:^|[^a-z0-9_])select (?:(?:distinct|all|top \d+) )?(?:\*|[a-z0-9_.@`"''$]+(?:\([^()]*\))?(?: as [a-z0-9_]+)?)(?: ?, ?(?:\*|[a-z0-9_.@`"''$]+(?:\([^()]*\))?(?: as [a-z0-9_]+)?))* from(?:[^a-z0-9_]|$)'
     tags: [OWASP_A03, injection, sqli]
+    refs: { cwe: [CWE-89], capec: [CAPEC-66] }
+    doc: |
+      `select`, a column list and `from`: a subquery or a second statement. The list is what
+      SQL has there — `*`, names, numbers, quoted names, calls such as `version()`, `as` aliases,
+      separated by commas — so prose with words between the two ("please select one option from
+      the list") does not match, while "select a from" still does. High, not critical: a one-word
+      list is still English ("select one from the list"), so it refuses only with another hit,
+      such as a quote trick.
 
   - id: wf-942-120
     set: sqli
     phase: head
     msg: "SQL function for timing, files or the system (sleep, benchmark, load_file, xp_cmdshell)"
     severity: critical
+    confidence: high
     targets: [args, cookies, body]
     transform: [url_decode, remove_nulls, lowercase, remove_comments, compress_whitespace]
     operator:
       contains_any: ['sleep(', 'benchmark(', 'pg_sleep(', 'waitfor delay', 'information_schema',
                      'load_file(', 'xp_cmdshell', '@@version']
     tags: [OWASP_A03, injection, sqli]
+    refs: { cwe: [CWE-89], capec: [CAPEC-66], crs: [942160, 942280] }
+    doc: |
+      The functions of blind and out-of-band injection: `sleep(`, `benchmark(`, `pg_sleep(`,
+      `waitfor delay`, and the system catalog, file and command functions (`information_schema`,
+      `load_file(`, `xp_cmdshell`, `@@version`). None of them is in an honest form value but on
+      a site about databases.
 
   - id: wf-942-130
     set: sqli
     phase: head
     msg: "SQL tautology (' or ', or 1=1, and 1=1)"
     severity: high
+    confidence: medium
     targets: [args, cookies, body]
     transform: [url_decode, remove_nulls, lowercase, remove_comments, compress_whitespace]
     operator: { contains_any: ["' or '", '" or "', 'or 1=1', 'and 1=1', "' or 1", '" or 1'] }
     tags: [OWASP_A03, injection, sqli]
+    refs: { cwe: [CWE-89], capec: [CAPEC-66], crs: [942130] }
+    doc: |
+      A quote closed and an `or` opened (`' or '`, `" or 1`), or `or 1=1` / `and 1=1`: the
+      authentication bypass and the boolean probe. High: quoted alternatives in prose ("'tea' or
+      'coffee'") match too, so it needs a second hit, which a real injection brings.
 
   - id: wf-942-140
     set: sqli
     phase: head
     msg: "SQL comment after a quote or a semicolon, or a MySQL version comment (/*!)"
     severity: high
+    confidence: medium
     targets: [args, cookies, body]
     transform: [url_decode, remove_nulls, lowercase, compress_whitespace]
     operator: { contains_any: ["'--", '"--', "' --", '" --', ';--', '; --', '/*!'] }
     tags: [OWASP_A03, injection, sqli]
+    refs: { cwe: [CWE-89], capec: [CAPEC-66], crs: [942440] }
+    doc: |
+      A quote or a semicolon followed by `--`, which cuts off the rest of the query (`admin'--`),
+      or MySQL's version comment `/*!`, which hides keywords from filters. Prose with a dash
+      after a quote ("he said 'no' -- then left") matches, hence high: it refuses with another
+      hit.
 
   - id: wf-942-150
     set: sqli
     phase: head
     msg: "char() or concat() with a quote, or a hex literal with a quote"
     severity: medium
+    confidence: medium
     targets: [args, cookies, body]
     transform: [url_decode, remove_nulls, lowercase, remove_comments, compress_whitespace]
     prefilter: ['char(', 'concat(', '0x']
     operator:
       regex: '(?:[''"].{0,40}?(?:^|[^a-z0-9_])(?:char|concat)\(|(?:^|[^a-z0-9_])(?:char|concat)\(.{0,40}?[''"]|[''"].{0,20}?0x[0-9a-f]{8}|0x[0-9a-f]{8}.{0,20}?[''"])'
     tags: [OWASP_A03, injection, sqli]
+    refs: { cwe: [CWE-89], capec: [CAPEC-66] }
+    doc: |
+      `char(` or `concat(` near a quote, or a hex literal of eight digits or more near a quote:
+      how an injection builds strings without writing them, past a filter of keywords. Medium:
+      code snippets and spreadsheet formulas have it, so it only adds to other hits.
 
   - id: wf-942-160
     set: sqli
     phase: head
     msg: "Stacked SQL statement (; drop, ; delete, ; update, ; insert)"
     severity: high
+    confidence: medium
     targets: [args, cookies, body]
     transform: [url_decode, remove_nulls, lowercase, remove_comments, compress_whitespace]
     prefilter: [';']
     operator: { regex: ';\s*(?:drop|delete|update|insert)(?:[^a-z0-9_]|$)' }
     tags: [OWASP_A03, injection, sqli]
+    refs: { cwe: [CWE-89], capec: [CAPEC-66] }
+    doc: |
+      A semicolon followed by `drop`, `delete`, `update` or `insert`: a second statement stacked
+      after the one the value was put into. Prose with a semicolon before one of the words
+      ("saved; update tomorrow") matches, hence high.
 
   # libinjection's SQL injection detector (CRS 942100), on what one of the prefilter's literals
   # occurs in: the quotes, `=`, `(`, `;`, comments, `||`, `@@`, `union`, `select`. An injection with
@@ -90,8 +143,82 @@ rules:
     phase: head
     msg: "SQL injection (libinjection)"
     severity: critical
+    confidence: high
     targets: [args, args_names, cookies, cookies_names, body.json]
     transform: [url_decode, remove_nulls, lowercase, compress_whitespace]
     prefilter: ["'", '"', '`', '=', '(', ';', '--', '/*', '||', '@@', union, select]
     operator: detect_sqli
     tags: [OWASP_A03, injection, sqli, libinjection]
+    refs: { cwe: [CWE-89], capec: [CAPEC-66], crs: [942100] }
+    doc: |
+      libinjection's SQL injection detector, which tokenizes a value as SQL in each quoting
+      context and compares the token sequence with its list of injection fingerprints; the hit's
+      `matched` starts with the fingerprint. It runs only on a value with one of the prefilter's
+      literals, so most values never reach it. Measured on the crate's evaluation set it has no
+      false positive among names with apostrophes, prose with keywords, URLs and JSON; a value it
+      misjudges is excluded by target, or the rule's score lowered by `override`.
+
+  # MySQL's `procedure analyse` (column types read through an injection) and `shutdown` stacked
+  # after a semicolon: no quote, `=` or parenthesis that would open wf-942-170's gate before it.
+  - id: wf-942-180
+    set: sqli
+    phase: head
+    msg: "SQL procedure analyse or a stacked shutdown"
+    severity: critical
+    confidence: high
+    targets: [args, cookies, body]
+    transform: [url_decode, remove_nulls, lowercase, remove_comments, compress_whitespace]
+    prefilter: ['procedure analyse', 'shutdown']
+    operator: { regex: 'procedure analyse\s*\(|;\s*shutdown\s*(?:with\s+nowait\s*)?(?:;|--|#|/\*|$)' }
+    tags: [OWASP_A03, injection, sqli]
+    refs: { cwe: [CWE-89], capec: [CAPEC-66], crs: [942280] }
+    doc: |
+      MySQL's `procedure analyse(`, appended to a query to read its columns' types, and
+      `shutdown` stacked after a semicolon and ending the statement (`'; shutdown--`), which stops
+      a SQL Server. The call needs its parenthesis and the shutdown its end (`;`, a comment or the
+      end of the value), so prose ("the procedure analyses", "power failure; shutdown at 5") does
+      not match.
+
+  # A quote followed by `#`, `--` or `/*` at the end of the value: the quote closes the string the
+  # value was put into and the comment drops the rest of the query (`admin' #`). The chain keeps
+  # the comments (it is wf-942-140's).
+  - id: wf-942-190
+    set: sqli
+    phase: head
+    msg: "Quote closed by a SQL comment at the end of a value (admin' #, admin'/*)"
+    severity: critical
+    confidence: high
+    targets: [args, cookies, body]
+    transform: [url_decode, remove_nulls, lowercase, compress_whitespace]
+    prefilter: ["'#", "' #", "'--", "' --", "'/*", "' /*", '"#', '" #', '"--', '" --', '"/*', '" /*']
+    operator: { regex: '[''"] ?(?:#|--|/\*)[\s-]*$' }
+    tags: [OWASP_A03, injection, sqli]
+    refs: { cwe: [CWE-89], capec: [CAPEC-66], crs: [942440] }
+    doc: |
+      A quote followed by a comment (`#`, `--`, `/*`) and nothing more: the login bypass
+      `admin' #` / `admin'--` / `admin'/*`, which closes the string and drops the password check.
+      Anchored at the end of the value, so `it's #1` and `O'Brien -- CEO` do not match. A value
+      that really ends in a quote and a dash or hash ("say 'hi' --") is the rare false positive.
+
+  # A number, `or`/`and`, and a constant truth as the whole value: `1 or true`, `-1 or 2>1`,
+  # `1 and 1=1`, `0 or not 0`. Without a quote or `=` libinjection's gate stays shut on some of
+  # them; anchored at both ends, so a sentence with "1 or 2" is not matched.
+  - id: wf-942-200
+    set: sqli
+    phase: head
+    msg: "Numeric SQL tautology as the whole value (1 or true, -1 or 2>1, 1 and 1=1)"
+    severity: critical
+    confidence: high
+    targets: [args, cookies, body]
+    transform: [url_decode, remove_nulls, lowercase, remove_comments, compress_whitespace]
+    prefilter: [' or ', ' and ', ' xor ', '||', '&&']
+    operator:
+      regex: '^\s*-?\d+(?:\s+(?:or|and|xor)\s+|\s*(?:\|\||&&)\s*)(?:not\s+-?\d+|true|-?\d+\s*(?:=|<=>|<>|!=|<=|>=|<|>)\s*-?\d+)\s*$'
+    tags: [OWASP_A03, injection, sqli]
+    refs: { cwe: [CWE-89], capec: [CAPEC-66] }
+    doc: |
+      A whole value that is a number, `or`, `and` or `xor`, and something always true or a
+      comparison of numbers (`1 or true`, `-1 or 2>1`, `1 and 1=1`, `0 or not 0`): the probe of
+      a numeric parameter (`?id=1 or true`) that has no quote for other rules to see. Anchored at
+      both ends of the value, so "1 or 2 items" and "1 < 2 and 3 > 2" do not match; a numeric
+      field that takes a comparison as text ("2 or 3>1") would be the false positive.

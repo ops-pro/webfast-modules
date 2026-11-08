@@ -67,9 +67,10 @@ response:
     secret: env:TURNSTILE_SECRET  # the secret, or `env:NAME` for the variable that holds it
 
 rules:
-  builtin: all                    # all | none | [protocol, scanners, traversal, rfi, cmdi, php, sqli, xss, template, upload, leakage]
+  builtin: all                    # all | none | [protocol, scanners, traversal, rfi, cmdi, php, sqli, xss, template, upload, leakage, cve]
   include: [rules/site.yaml]      # the site's own files, relative to this file, applied in order
   disable: [wf-942-130, wf-921-*] # ids, or masks with a trailing `*`
+  disable_tags: [wordpress]       # every rule with one of these tags (a site that is not WordPress)
   override:                       # fields of a rule changed in place (any field but `id`)
     wf-913-100: { score: 2 }
     wf-920-300: { mode: log_only }
@@ -150,7 +151,8 @@ binary pulls this crate with `default-features = false` and names `challenge` al
 is in its build only when its `ngfw` feature also names `webfast-ngfw/libinjection`.
 
 **Composition.** The rule list is built in this order: the built-in sets named by `builtin`; the
-files of `include`, in order; then `override`, then `disable`. A rule in an included file with the
+files of `include`, in order; then `override`, then `disable`, then `disable_tags` (a rule with
+any of the tags is left out; a tag no rule has is a warning). A rule in an included file with the
 `id` of an earlier rule **replaces** it, keeping its position; so one built-in rule is patched
 without touching its set, and `builtin: none` with `include` gives a site its own rules only.
 `validate` prints the resulting count per set and every replaced, overridden and disabled id.
@@ -198,12 +200,15 @@ Rules are YAML, a list under `rules:` in each file (the built-in sets are files 
 format in `crates/webfast-ngfw/src/rules/`, compiled into the crate with `include_str!`).
 
 ```yaml
+doc: |                            # the file's (a set's) description, for the reference
+  PHP code and its wrappers in what a client sends.
 rules:
   - id: wf-933-120
     set: php                      # the set it belongs to (exclusions by set, counts)
     phase: head                   # connection | head | body | upload | response
     msg: "PHP stream wrapper in a parameter"
     severity: critical            # critical 5, high 4, medium 3, low 2, notice 1: the default score
+    confidence: high              # high | medium (default) | low: how rare its false positives are
     score: 5                      # explicit; 0 with `action: log` for a rule that only writes
     targets: [args, args_names, cookies, headers.referer, path]
     transform: [url_decode, lowercase, remove_nulls, compress_whitespace]
@@ -214,11 +219,23 @@ rules:
     unless: [wf-920-100]          # does not run if one of these matched
     mode: block                   # block | log_only | challenge, this rule's own
     tags: [OWASP_A03, injection, php]
+    refs:                         # references, checked at load
+      cwe: [CWE-98]               # CWE-<n>
+      capec: [CAPEC-193]          # CAPEC-<n>
+      crs: [933110]               # the OWASP CRS v4 rule it corresponds to (six digits)
+      cve: []                     # CVE-<year>-<n>, for a rule against one vulnerability
+      urls: []                    # https:// only
+    doc: |                        # what it catches, why its score, its false positives, how to exclude it
+      A PHP stream wrapper (`php://`, `phar://` …) in a value: …
 ```
 
-Required: `id` (`wf-` + three digits + `-` + three digits for the built-in ones; a site's own
-may be any `[a-z0-9-]+`), `phase`, `targets` (not for `connection`), `operator`. `msg` defaults
-to the id, `severity` to `medium`, `set` to `site` for a site's rules.
+Required: `id` (`wf-` + three digits + `-` + three digits for the built-in ones, `wf-cve-` + the
+CVE's year and number for the `cve` set; a site's own may be any `[a-z0-9-]+`), `phase`,
+`targets` (not for `connection`), `operator`. `msg` defaults to the id, `severity` to `medium`,
+`confidence` to `medium`, `set` to `site` for a site's rules. A malformed reference (`CWE-x`, a
+CRS id of five digits, an `http://` URL) does not load, naming the rule and the field.
+`severity`, `confidence`, `tags` and `refs` are written with each hit in the log; `doc` and the
+file's `doc` are for the reference (below) and for whoever reads the file, not for the server.
 
 ### Targets
 
@@ -314,7 +331,12 @@ Exactly one per rule:
 
 Numbered by the CRS sections they correspond to, so the numbers are familiar; the rules are this
 module's own, few (tens, not hundreds) and cheap. Each set is a file `crates/webfast-ngfw/src/rules/<set>.yaml`.
-Every rule has `msg`, `severity`, `tags` with the OWASP category.
+Every rule has `msg`, `severity`, `confidence`, `tags` with the OWASP category, `refs` with its
+CWE (and CAPEC, and the CRS rule where one was checked against CRS v4) and a `doc`; a test holds
+every built-in rule to it. Every rule, its targets, chain, operator, score and description, is
+in **[docs/ngfw-rules.md](ngfw-rules.md)**, generated from these files, with an index by CVE and
+by CWE. The test `the_rules_reference_is_current` fails when the files and the reference differ;
+`UPDATE_RULES_DOC=1 cargo test -p webfast-ngfw the_rules_reference_is_current` writes it again.
 
 - **protocol (920)** — method not in `[GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS]` (medium);
   HTTP/1.0 without Host; a control or non-UTF-8 byte in the path or a header; `%00`; double
@@ -347,7 +369,8 @@ Every rule has `msg`, `severity`, `tags` with the OWASP category.
   as function calls; `allow_url_include auto_prepend_file auto_append_file disable_functions
   open_basedir` as names; serialized objects `O:\d+:"` and `a:\d+:{` in args/cookies/body;
   `.php` followed by a path separator in the path (`/a.php/b`, path info abuse).
-- **sqli (942)** — `union select`, `union all select`, `select ... from`, `insert into`, `drop
+- **sqli (942)** — `union select`, `union all select`, `select <columns> from` (a column list:
+  names, `*`, calls, aliases, so prose with words between the two does not match), `insert into`, `drop
   table`, `' or '`, `" or "`, `or 1=1`, `and 1=1`, `sleep(`, `benchmark(`, `pg_sleep(`,
   `waitfor delay`, `information_schema`, `load_file(`, `into outfile`, `xp_cmdshell`,
   `/*!`, `--` with a quote before it, `;--`, `@@version`, `char(`, `concat(` with a quote, `0x` +
@@ -358,7 +381,11 @@ Every rule has `msg`, `severity`, `tags` with the OWASP category.
   compress_whitespace` (CRS: `utf8toUnicode urlDecodeUni removeNulls`; the chain is wf-942-140's,
   so a value goes through no chain more; comments are kept, libinjection reads them), gated by
   `' " ` = ( ; -- /* || @@ union select`. Not on the User-Agent or the Referer, as CRS has it: a
-  browser's User-Agent has `(` and `;`, and the detector would run on every request.
+  browser's User-Agent has `(` and `;`, and the detector would run on every request. And three
+  rules for what libinjection lets through (critical): **wf-942-180** `procedure analyse(` and a
+  stacked `; shutdown` that ends the statement; **wf-942-190** a quote closed by a comment at the
+  end of a value (`admin' #`, `admin'--`, `admin'/*`); **wf-942-200** a numeric tautology as the
+  whole value (`1 or true`, `-1 or 2>1`, `1 and 1=1`, `0 or not 0`), anchored at both ends.
 - **xss (941)** — `<script`, `</script`, `javascript:`, `vbscript:`, `data:text/html`, `on` +
   event name + `=` (`onload= onerror= onmouseover= onfocus= onclick=` …), `<svg`, `<iframe`,
   `<object`, `<embed`, `<img src=x onerror`, `document.cookie`, `document.location`,
@@ -369,19 +396,23 @@ Every rule has `msg`, `severity`, `tags` with the OWASP category.
   htmlEntityDecode jsDecode cssDecode removeNulls`; ngfw has no `css_decode`), gated by `<`,
   `javascript: vbscript: data: expression(` and the event handler names of wf-941-120 (and
   `onstart`). A quote alone does not open the gate: an attribute broken out of needs one of these
-  to run script.
+  to run script. And for what libinjection lets through: **wf-941-160** a tag split by another
+  (`<scr<script>ipt>`), **wf-941-170** a script scheme broken up by control characters or spaces
+  (`jav&#x09;ascript:`, `j a v a s c r i p t :`), on a chain that keeps the whitespace.
 
   **What the gates trade**, measured on the crate's evaluation set (src/detect/corpus.rs: 65 SQL
-  injections, 50 XSS payloads, 98 benign values; the test `gates_by_measurement` prints it):
-  wf-942-170 catches 60 of the 65 as a form or cookie value (libinjection alone, ungated, 61: the
-  gate loses `-1 or 2>1`, which has no quote, `=` or parenthesis), with no false positive (ungated
-  one: `1 < 2 and 3 > 2`), and opens on 46 of the 98 benign values (names with apostrophes, `=`
-  and parentheses in text) instead of all of them; a gate of keywords as well (` or `, ` and `)
-  catches no more and opens on most prose. wf-941-150 catches 48 of the 50, as ungated, with no
-  false positive, and opens on 7 of the 98 benign values. libinjection itself misses `1 or true`,
-  `1 procedure analyse()`, `admin' #` and `'; shutdown--`, and `<scr<script>ipt>` and a tab
-  entity inside `javascript:`. As a query value (an HTML form's GET writes its spaces as `+`, read
-  as spaces: `args` above) the two catch 60 of the 65 and 47 of the 50, with `+` or `%20`.
+  injections, 50 XSS payloads, 104 benign values; the test `gates_by_measurement` prints it):
+  wf-942-170 catches 60 of the 65 (libinjection alone, ungated, 61: the gate loses `-1 or 2>1`,
+  which has no quote, `=` or parenthesis), with no false positive (ungated one: `1 < 2 and 3 >
+  2`), and opens on 49 of the 104 benign values (names with apostrophes, `=` and parentheses in
+  text) instead of all of them; a gate of keywords as well (` or `, ` and `) catches no more and
+  opens on most prose. wf-941-150 catches 48 of the 50, as ungated, with no false positive, and
+  opens on 8 of the 104. libinjection itself misses `1 or true`, `1 procedure analyse()`, `admin'
+  #` and `'; shutdown--`, and `<scr<script>ipt>` and a tab entity inside `javascript:`: the rules
+  above take them. **The sets together** refuse every one of the 115 payloads as a query value
+  (spaces as `%20` and as `+`, an HTML form's GET: `args` above) and as a cookie, and hit none of
+  the 104 benign values with any rule (the test `the_whole_filter_refuses_the_corpus_and_hits_no_benign_value`,
+  with a browser's User-Agent and Accept).
 - **template (944)** — `{{`, `}}`, `${`, `#{`, `<%`, `%>` with a call inside (`(`), `__class__
   __globals__ __import__ __subclasses__ mro( lipsum cycler joiner`, `T(java.lang`, `freemarker`,
   `#set(`, `${jndi:` (critical, `block`).
@@ -404,6 +435,20 @@ Every rule has `msg`, `severity`, `tags` with the OWASP category.
   with `response.stream: false`) replaces the response by `leak_status` through `handle_errors`,
   body dropped; a match in a streamed 200's body cuts the response before the frame that has it
   (see "Response phase"). Either is written to the log as `leak` with the matched text.
+- **cve** — known, exploited vulnerabilities of web products, each by the narrow signature of its
+  exploit request (a path, a header, a parameter name), not by a technique; one rule per CVE,
+  named after it (`wf-cve-2022-22965`), critical, `block`, confidence high, with the CVE, CWE and
+  advisory in `refs` and the product in `tags`: Shellshock (CVE-2014-6271), Apache Struts 2
+  (2017-5638), PHPUnit eval-stdin (2017-9841), Drupalgeddon2 (2018-7600), FortiOS fgt_lang
+  (2018-13379), ThinkPHP (2018-20062), Citrix ADC (2019-19781), F5 BIG-IP TMUI (2020-5902) and
+  iControl REST (2022-1388), Exchange ProxyShell and ProxyNotShell (2021-34473, 2022-41040),
+  Apache HTTP Server 2.4.49 and 2.4.50 (2021-41773, 2021-42013), Spring Cloud Function
+  (2022-22963), Spring4Shell (2022-22965), Confluence (2022-26134), Text4Shell (2022-42889),
+  Ivanti Connect Secure (2023-46805, 2024-21887), PAN-OS GlobalProtect (2024-3400), PHP-CGI
+  (2024-4577), GeoServer (2024-36401), Next.js middleware (2025-29927). Log4Shell (2021-44228)
+  is in `template`. A site that is one of these products and reaches its own administration
+  through webfast (F5's `/mgmt/tm/util/bash` is an administrators' endpoint) turns the product
+  off by its tag: `disable_tags: [f5]`.
 
 Each rule has a stable id; a site that needs a rule the sets do not have writes it in its own
 file; a rule that a new vulnerability calls for is added to the set that fits and reaches sites
@@ -419,18 +464,19 @@ One JSON line per event through the core's `webfast_core::eventlog`, extended wi
  "request":{"client_ip":"203.0.113.7","country":"NL","asn":1136,"method":"POST","host":"www.example.com",
             "uri":"/upload","user_agent":"Mozilla/5.0 …"},
  "decision":"block","status":403,"score":9,"threshold":5,"phase":"upload",
- "hits":[{"id":"wf-960-110","set":"upload","score":5,"target":"upload.ext","matched":"php"},
-         {"id":"wf-960-140","set":"upload","score":4,"target":"upload.head","matched":"<?php"}]}
+ "hits":[{"id":"wf-960-110","set":"upload","score":5,"severity":"critical","confidence":"high",
+          "tags":["OWASP_A04","upload","webshell"],
+          "refs":{"cwe":["CWE-434"],"capec":["CAPEC-650"],"crs":[933110]},
+          "target":"upload.ext","matched":"php"},
+         {"id":"wf-960-140","set":"upload","score":4,"severity":"high","confidence":"medium",
+          "tags":["OWASP_A04","upload","webshell","polyglot"],
+          "refs":{"cwe":["CWE-434"],"capec":["CAPEC-650"]},
+          "target":"upload.head","matched":"<?php"}]}
 ```
 
-`decision`: `block`, `ban`, `log_only` (would have refused), `scored` (with `log.passed`: under the
-threshold), `access` (refused by `access`, with `reason`: `country`, `asn`, `ip`, `ban`,
-`honeypot`), `leak` (response phase), `challenge` (answered with the browser challenge; `status`
-503 or 302; `reason` `country`, `asn` or `ban` when `access` asked, none for a rule, whose `hits`
-are written), `challenge_passed` (a challenge was due and the client had passed it: let through,
-`status` 0). `matched` is cut to `log.matched` bytes and JSON-escaped;
-values of parameters the JWT check hides stay hidden. A refused request is also in the site's
-access log as any other.
+Each hit names the rule's `severity`, `tags`, and its `confidence` and `refs` (only the lists
+that are not empty) when it has them, so a SIEM selects by CWE, CVE or OWASP category without a
+table of rule ids.
 
 ## Performance
 
@@ -477,6 +523,12 @@ access log as any other.
   about 3 µs more. The detector allocates as it reads: barbacane-libinjection 0.1.3 upper-cases
   each word into a new `String` to look it up among the keywords, and formats a `String` for each
   pair of words it tries to fold and for the fingerprint's lookup.
+- The `cve` set and the rules for libinjection's gaps (98 built-in rules, 72 before) add targets
+  a clean GET has (every header for Shellshock and Text4Shell, the raw path, the parameter
+  names): the connection and head phases of a clean GET under `builtin: all`, timed in process
+  in release on one core (tests/cost.rs, the best of five, five rounds alternating with the
+  previous commit), take 3.69 µs where they took 3.36, and still allocate nothing (the same test
+  counts the allocations).
 
 ## Module layout and interfaces
 
@@ -635,7 +687,15 @@ covers (an image, a 304) are not read. Of the body, at most `body.max_inspect` b
   patterns back to rules, the decision with thresholds and modes, exclusions by path/host/target/set/rule, `when`/`unless`, prefix
   tries with v4 and v6 and lists with comments, bans counting within the window and expiring,
   multipart parts from a cut prefix, geo with a small mmdb made in the test (the `maxminddb`
-  crate's test data, or a writer-made file), the response inspection chaining the body.
+  crate's test data, or a writer-made file), the response inspection chaining the body. The
+  metadata: malformed `refs` refused, `disable_tags`, every built-in rule with a `doc`, a
+  `confidence` and a CWE (a `cve` rule also with its CVE, a URL and its product's tag), and the
+  reference in step with the files. The sets together over the evaluation set: every payload
+  refused as a query value (`%20` and `+`) and as a cookie, no benign value hit by any rule. Each
+  `cve` rule takes the marker of its exploit's request and lets an ordinary request to the same
+  product through. A query parameter and a cookie without `=` (`?debug`, `Cookie: flag`).
+- `tests/cost.rs`: a counting allocator holds a clean GET's connection and head phases under
+  `builtin: all` to no allocation; an ignored test prints their time.
 - `tests/ngfw.rs`: a server booted by the core's test harness (`webfast_core::harness`) with a
   composition of this crate (and the challenge, when built) and the module's instance put on the
   parsed configuration as `Module::load` would, requests that are refused (scanner UA, `/.env`, `union select` in a query, a `.php.jpg`
@@ -648,7 +708,8 @@ covers (an image, a 304) are not read. Of the body, at most `body.max_inspect` b
   `log_only` passing it whole, a header rule replacing a 200 before any byte, and a site's own
   rule replacing a built-in one. With libinjection built: a quoted SQL injection in a query and an
   XSS in a form body that the other rules score under the threshold refused, a name with an
-  apostrophe let through. With the challenge built: a rule
+  apostrophe let through. A query parameter and a cookie without `=` let through, and a hit's
+  log line with its severity, tags and CWE. With the challenge built: a rule
   with `action: challenge` answers the page (503, a nonce, not the error page) and, with the cookie
   earned at `POST /.well-known/c-wf`, lets the request through with the hit written as
   `challenge_passed`; `mode: challenge` turns the built-in blocks into the page; `ban.then:

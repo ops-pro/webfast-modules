@@ -1,23 +1,32 @@
-# Set `php` (wf-933-*): PHP injection. Stream wrappers, PHP open tags in a parameter, the
-# dangerous functions called, the ini directives attackers set, serialized objects, and `.php`
-# followed by path info.
-# OWASP: A03 Injection. A site that is not PHP keeps the set: the payloads say what the client is.
+doc: |
+  Set `php` (wf-933-*): PHP injection. Stream wrappers, PHP open tags in a parameter, the
+  dangerous functions called, the ini directives attackers set, serialized objects, and `.php`
+  followed by path info.
+  OWASP: A03 Injection. A site that is not PHP keeps the set: the payloads say what the client is.
 rules:
   - id: wf-933-100
     set: php
     phase: head
     msg: "PHP open tag in a parameter"
     severity: critical
+    confidence: high
     targets: [args, cookies, body]
     transform: [url_decode, remove_nulls, lowercase, compress_whitespace]
     operator: { contains_any: ['<?php', '<?='] }
     tags: [OWASP_A03, injection, php]
+    refs: { cwe: [CWE-94], capec: [CAPEC-242], crs: [933100] }
+    doc: |
+      `<?php` or `<?=` in a parameter, a cookie or the body: code sent to be written into a file
+      that is later included, or evaluated. A code-sharing or support site where users paste PHP
+      hits it honestly; it excludes the rule on the paste field. An XML declaration (`<?xml`)
+      does not match.
 
   - id: wf-933-110
     set: php
     phase: head
     msg: "PHP function that runs code, commands or files, called in a parameter"
     severity: critical
+    confidence: medium
     targets: [args, cookies, body]
     transform: [url_decode, remove_nulls, lowercase, compress_whitespace]
     operator:
@@ -25,57 +34,99 @@ rules:
                      'assert(', 'create_function(', 'include(', 'require(', 'file_get_contents(',
                      'file_put_contents(', 'unserialize(']
     tags: [OWASP_A03, injection, php]
+    refs: { cwe: [CWE-94], capec: [CAPEC-242], crs: [933160] }
+    doc: |
+      A call of a PHP function that runs code or commands or reads and writes files
+      (`system(`, `eval(`, `shell_exec(`, `file_put_contents(`, ...): the payload of a code
+      injection or a web shell's command. The words with a parenthesis are rare in prose, but
+      `include(` and `require(` turn up in code questions and JavaScript snippets; a developer
+      forum excludes its text fields.
 
   - id: wf-933-115
     set: php
     phase: head
     msg: "preg_replace with the /e modifier"
     severity: critical
+    confidence: high
     targets: [args, cookies, body]
     transform: [url_decode, remove_nulls, lowercase, compress_whitespace]
     prefilter: ['preg_replace']
     operator: { regex: 'preg_replace\s*\(.{0,200}?/[a-z]*e[a-z]*[''"]' }
     tags: [OWASP_A03, injection, php]
+    refs: { cwe: [CWE-95], capec: [CAPEC-242] }
+    doc: |
+      `preg_replace(` with a pattern whose modifiers include `e`, which old PHP versions evaluated
+      as code. Sent by exploit kits against legacy applications. Only a code paste on a
+      developer site matches honestly.
 
   - id: wf-933-120
     set: php
     phase: head
     msg: "PHP stream wrapper in a parameter"
     severity: critical
+    confidence: medium
     targets: [args, args_names, cookies, headers.referer, path]
     transform: [url_decode, remove_nulls, lowercase, compress_whitespace]
     operator: { contains_any: ['php://', 'phar://', 'data:', 'expect://', 'zip://', 'glob://'] }
     tags: [OWASP_A03, injection, php]
+    refs: { cwe: [CWE-98], capec: [CAPEC-193], crs: [933200, 933140] }
+    doc: |
+      A PHP stream wrapper (`php://input`, `phar://`, `expect://`, `zip://`, `glob://`) or a
+      `data:` URI in a parameter, its name, a cookie, the Referer or the path: how a file
+      inclusion reads the request body, unpacks an archive or runs a command. Medium confidence
+      because of `data:`: a form that takes an image as a data URL (an avatar cropper, a canvas
+      export) sends `data:image/png;base64,...` honestly, and is excluded by target.
 
   - id: wf-933-130
     set: php
     phase: head
     msg: "PHP ini directive name in a parameter"
     severity: medium
+    confidence: medium
     targets: [args, args_names, cookies, body]
     transform: [url_decode, remove_nulls, lowercase, compress_whitespace]
     operator:
       contains_any: [allow_url_include, auto_prepend_file, auto_append_file, disable_functions, open_basedir]
     tags: [OWASP_A03, injection, php]
+    refs: { cwe: [CWE-15], crs: [933120] }
+    doc: |
+      The ini directives an attacker sets to turn an inclusion or a CGI argument injection into
+      code execution (`allow_url_include`, `auto_prepend_file`, ...). Medium, so it needs another
+      hit: the names also appear in honest PHP hosting control panels and documentation
+      searches.
 
   - id: wf-933-140
     set: php
     phase: head
     msg: "Serialized PHP object or array in a parameter"
     severity: high
+    confidence: medium
     targets: [args, cookies, body]
     transform: [url_decode, remove_nulls, lowercase, compress_whitespace]
     prefilter: [':"', ':{']
     operator: { regex: '(?:^|[^a-z0-9_])[oa]:\d+:["{]' }
     tags: [OWASP_A03, injection, php, deserialization]
+    refs: { cwe: [CWE-502], capec: [CAPEC-586], crs: [933170] }
+    doc: |
+      A PHP serialized object (`O:8:"stdClass"`) or array (`a:2:{`) in a value: the input of an
+      `unserialize()` that builds attacker-chosen objects (a POP chain). Some PHP applications
+      keep serialized arrays in their own cookies or hidden fields, which is the false positive;
+      those are excluded by target (`targets: [cookies.<name>]`).
 
   - id: wf-933-150
     set: php
     phase: head
     msg: ".php followed by path info (/a.php/b)"
     severity: medium
+    confidence: medium
     targets: [path]
     transform: [lowercase]
     prefilter: ['.php']
     operator: { regex: '\.ph(?:p[0-9]?|tml|ar)/' }
     tags: [OWASP_A03, injection, php, pathinfo]
+    refs: { cwe: [CWE-20] }
+    doc: |
+      A `.php` (or `.phtml`, `.phar`) segment followed by more path: path info, which reaches a
+      script past a rule that looks at the path's end (`/admin.php/style.css` served by
+      `admin.php`). Front controllers with path info (`/index.php/blog/post`) are common in PHP
+      frameworks; such a site disables the rule (`disable: [wf-933-150]`).

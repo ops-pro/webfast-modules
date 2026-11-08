@@ -1,14 +1,16 @@
-# Set `rfi` (wf-931-*): remote file inclusion and server-side request forgery. A URL in a
-# parameter whose name says it is a target (url, src, redirect, file, ...) pointing at an
-# address, localhost, the cloud metadata services or a numeric address; the file, gopher and dict
-# schemes anywhere.
-# OWASP: A10 Server-Side Request Forgery (and A03 Injection for the include wrappers).
+doc: |
+  Set `rfi` (wf-931-*): remote file inclusion and server-side request forgery. A URL in a
+  parameter whose name says it is a target (url, src, redirect, file, ...) pointing at an
+  address, localhost, the cloud metadata services or a numeric address; the file, gopher and dict
+  schemes anywhere.
+  OWASP: A10 Server-Side Request Forgery (and A03 Injection for the include wrappers).
 rules:
   - id: wf-931-100
     set: rfi
     phase: head
     msg: "URL to an address, localhost or a metadata service in a target parameter"
     severity: critical
+    confidence: medium
     targets: [args.url, args.uri, args.src, args.dest, args.redirect, args.next, args.path,
               args.file, args.page, args.include, args.template, args.callback]
     transform: [url_decode, remove_nulls, lowercase, compress_whitespace]
@@ -18,13 +20,27 @@ rules:
     operator:
       regex: '(?:https?|ftp)://(?:[^/@]*@)?(?:\d{1,4}\.\d{1,4}\.\d{1,4}\.\d{1,4}|0x[0-9a-f]{1,8}|\d{8,10}|0\d{3,11}|localhost|169\.254\.169\.254|metadata\.google\.internal|\[::1\]|\[::ffff:[0-9a-f.:]+\])(?::\d+)?(?:[/?#]|$)'
     tags: [OWASP_A10, rfi, ssrf]
+    refs: { cwe: [CWE-918, CWE-98], capec: [CAPEC-664], crs: [931100] }
+    doc: |
+      A URL whose host is an IP address (in any of the notations that hide one), `localhost`, the
+      IPv6 loopback or a cloud metadata host, in a parameter named like a fetch or include target
+      (`url`, `src`, `redirect`, `file`, `callback`, ...): the shape of server-side request
+      forgery and remote inclusion. Medium confidence: a development setup, or an application
+      that lets users link to a device on their network, sends such URLs honestly; it excludes
+      the parameter on its path.
 
   - id: wf-931-110
     set: rfi
     phase: head
     msg: "file://, gopher:// or dict:// scheme in a parameter"
     severity: critical
+    confidence: high
     targets: [args, cookies, path_raw]
     transform: [url_decode, remove_nulls, lowercase, compress_whitespace]
     operator: { contains_any: ['file://', 'gopher://', 'dict://'] }
     tags: [OWASP_A10, rfi, ssrf]
+    refs: { cwe: [CWE-918], capec: [CAPEC-664] }
+    doc: |
+      The `file://`, `gopher://` and `dict://` schemes, which turn a URL fetch into a file read or
+      a raw TCP request to an internal service (gopher to Redis or SMTP). No web form value
+      needs them. A help desk that takes pasted `file://` links from users is the false positive.

@@ -78,6 +78,16 @@ pub(crate) const SQLI: &[&str] = &[
 
 /// Benign values of parameters, cookies and form fields.
 pub(crate) const BENIGN: &[&str] = &[
+    // Near the rules of the measured gaps (wf-942-180..200, wf-941-160/170): prose that has their
+    // words without their shape.
+    "it's #1",
+    "O'Brien -- CEO",
+    "the procedure analyses the data",
+    "power failure; shutdown at 5",
+    "a < b and c > d",
+    "java script course for beginners",
+    // Not here: "he said 'no' -- then left", the known false positive of wf-942-140 (high: it
+    // refuses only with another hit; its doc says so).
     "O'Brien",
     "D'Angelo",
     "Patrick O'Neil",

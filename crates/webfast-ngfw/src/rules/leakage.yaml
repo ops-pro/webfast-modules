@@ -1,84 +1,125 @@
-# Set `leakage` (wf-950-*, the `response` phase): what an upstream should not tell the client.
-# In the first bytes of a 200 or 5xx response: PHP errors and stack traces, Java and Python
-# tracebacks, database error messages, directory listings. A match replaces the response by
-# `response.leak_status` through the site's `handle_errors`. The Server header with a full version
-# is noted (`log`), not refused; X-Powered-By is not a leak (sites set it on purpose).
-# OWASP: A05 Security Misconfiguration (verbose errors). The literals are case-sensitive: these
-# messages are written by the runtimes, not by people.
+doc: |
+  Set `leakage` (wf-950-*, the `response` phase): what an upstream should not tell the client.
+  In the first bytes of a 200 or 5xx response: PHP errors and stack traces, Java and Python
+  tracebacks, database error messages, directory listings. A match replaces the response by
+  `response.leak_status` through the site's `handle_errors`. The Server header with a full version
+  is noted (`log`), not refused; X-Powered-By is not a leak (sites set it on purpose).
+  OWASP: A05 Security Misconfiguration (verbose errors). The literals are case-sensitive: these
+  messages are written by the runtimes, not by people.
 rules:
   - id: wf-950-100
     set: leakage
     phase: response
     msg: "PHP error or exception text in the response"
     severity: critical
+    confidence: medium
     targets: [response.body]
     transform: []
     operator: { contains_any: ['Fatal error:', 'Parse error:', 'Stack trace:', 'Uncaught Exception', 'Uncaught Error'] }
     action: block
     tags: [OWASP_A05, leakage, php]
+    refs: { cwe: [CWE-209], capec: [CAPEC-54], crs: [953100] }
+    doc: |
+      A PHP fatal or parse error, an uncaught exception or a stack trace in the response body: it
+      shows file paths, code and sometimes arguments, and tells an attacker which input broke
+      what. The response is replaced. Medium confidence: a page that writes these words as
+      content (a blog post about PHP errors, a log viewer) is replaced too, and is excluded by
+      path.
 
   - id: wf-950-110
     set: leakage
     phase: response
     msg: "PHP warning with the file and line in the response"
     severity: high
+    confidence: medium
     targets: [response.body]
     transform: []
     prefilter: ['Warning:']
     operator: { regex: 'Warning:.{1,300}? on line \d+' }
     action: block
     tags: [OWASP_A05, leakage, php]
+    refs: { cwe: [CWE-209], capec: [CAPEC-54], crs: [953100] }
+    doc: |
+      A PHP warning with its file and line (`Warning: ... in /var/www/x.php on line 12`), the
+      sign of `display_errors` left on. The response is replaced. Documentation pages that quote
+      such warnings are the false positive.
 
   - id: wf-950-120
     set: leakage
     phase: response
     msg: "Java or Python stack trace in the response"
     severity: high
+    confidence: medium
     targets: [response.body]
     transform: []
     operator: { contains_any: ['at java.', 'Traceback (most recent call last)'] }
     action: block
     tags: [OWASP_A05, leakage, trace]
+    refs: { cwe: [CWE-209], capec: [CAPEC-54], crs: [952110] }
+    doc: |
+      A Java stack frame (`at java.`) or a Python traceback in the response: a debug error page
+      in production, with the code's structure and libraries. The response is replaced. A
+      developer blog or an issue tracker that shows traces is excluded by path.
 
   - id: wf-950-130
     set: leakage
     phase: response
     msg: "Database error message in the response"
     severity: critical
+    confidence: medium
     targets: [response.body]
     transform: []
     operator: { contains_any: ['SQLSTATE[', 'You have an error in your SQL syntax', 'Microsoft OLE DB', 'ODBC Driver'] }
     action: block
     tags: [OWASP_A05, leakage, sql]
+    refs: { cwe: [CWE-209], capec: [CAPEC-54] }
+    doc: |
+      A database driver's error text (`SQLSTATE[`, MySQL's syntax error, OLE DB, ODBC) in the
+      response: the feedback error-based SQL injection reads. Replacing the response takes that
+      feedback away. Pages about databases that quote these errors are the false positive.
 
   - id: wf-950-140
     set: leakage
     phase: response
     msg: "Oracle error code (ORA-nnnnn) in the response"
     severity: critical
+    confidence: medium
     targets: [response.body]
     transform: []
     prefilter: ['ORA-']
     operator: { regex: 'ORA-\d{5}' }
     action: block
     tags: [OWASP_A05, leakage, sql]
+    refs: { cwe: [CWE-209], capec: [CAPEC-54], crs: [951120] }
+    doc: |
+      An Oracle error code (`ORA-01756`) in the response, the Oracle counterpart of wf-950-130.
+      The pattern is specific; an unrelated `ORA-` followed by five digits (a product code) is
+      the rare false positive.
 
   - id: wf-950-150
     set: leakage
     phase: response
     msg: "Directory listing in the response"
     severity: high
+    confidence: high
     targets: [response.body]
     transform: []
     operator: { contains_any: ['<title>Index of /', 'Directory listing for'] }
     action: block
     tags: [OWASP_A05, leakage, listing]
+    refs: { cwe: [CWE-548], capec: [CAPEC-127], crs: [950130] }
+    doc: |
+      An automatic directory listing (Apache's and nginx's `Index of /`, Python's `Directory
+      listing for`): files the site did not mean to link become browsable. The response is
+      replaced. A site that lists a download directory on purpose excludes the rule on that
+      path.
 
   - id: wf-950-900
     set: leakage
     phase: response
     msg: "Server header with a full version"
     severity: notice
+    confidence: high
     score: 0
     targets: [response.headers.server]
     transform: []
@@ -86,3 +127,8 @@ rules:
     operator: { regex: '^(?:Apache|nginx|Microsoft-IIS|lighttpd|LiteSpeed|Jetty|Apache-Coyote|openresty|gunicorn|uvicorn|Werkzeug|Kestrel)/\d+\.\d+' }
     action: log
     tags: [OWASP_A05, leakage, server]
+    refs: { cwe: [CWE-200] }
+    doc: |
+      An upstream's Server header with a version (`Apache/2.4.41`), which tells a scanner which
+      vulnerabilities to try. Written to the log only (`action: log`, score 0): the fix is in
+      the upstream's configuration, and the line says which upstream to fix.

@@ -1,0 +1,504 @@
+doc: |
+  Set `cve` (wf-cve-*): known, exploited vulnerabilities of web products, each by the narrow
+  signature of its exploit request (a path, a header, a parameter name or value) rather than by
+  the technique the other sets look for. One rule per CVE, named after it (`wf-cve-2022-22965`; a
+  second rule for the same CVE gets `-b`), with the advisory, the CWE and the product in its
+  tags (`cve`, and `spring`, `apache`, `f5`, ...: `disable_tags` turns a product's rules off).
+  Every rule blocks at once: the signatures are what the public exploits send, not what a
+  product's own clients do. Log4Shell (CVE-2021-44228) is in the `template` set (wf-944-120).
+  OWASP: A06 Vulnerable and Outdated Components.
+rules:
+  - id: wf-cve-2014-6271
+    set: cve
+    phase: head
+    msg: "Shellshock: a bash function definition at the start of a header or parameter (CVE-2014-6271)"
+    severity: critical
+    confidence: high
+    targets: [headers, args]
+    transform: [url_decode]
+    prefilter: ['()', '( )']
+    operator: { regex: '^\s*\(\s*\)\s*\{' }
+    action: block
+    tags: [OWASP_A06, cve, bash]
+    refs:
+      cve: [CVE-2014-6271]
+      cwe: [CWE-78]
+      capec: [CAPEC-88]
+      crs: [932170, 932171]
+      urls: ['https://nvd.nist.gov/vuln/detail/CVE-2014-6271']
+    doc: |
+      Shellshock: bash before 4.3 patch 25 runs what follows a function definition in an
+      environment variable, and CGI passes every header (and the query) to the script as one.
+      The exploit puts `() { :; }; command` at the start of the User-Agent, the Referer or a
+      cookie. The rule matches a header or parameter value that starts with `() {`. No browser or
+      form sends that; the risk of a false positive is negligible.
+
+  - id: wf-cve-2017-5638
+    set: cve
+    phase: head
+    msg: "Apache Struts 2 OGNL in the Content-Type (CVE-2017-5638)"
+    severity: critical
+    confidence: high
+    targets: [headers.content-type]
+    transform: []
+    operator: { contains_any: ['%{', '${'] }
+    action: block
+    tags: [OWASP_A06, cve, struts]
+    refs:
+      cve: [CVE-2017-5638]
+      cwe: [CWE-20, CWE-917]
+      capec: [CAPEC-242]
+      urls: ['https://cwiki.apache.org/confluence/display/WW/S2-045']
+    doc: |
+      Apache Struts 2 (2.3.5 to 2.3.31, 2.5 to 2.5.10), the Jakarta multipart parser: an invalid
+      Content-Type is put into an error message that is evaluated as OGNL, so
+      `Content-Type: %{(#_='multipart/form-data')...}` runs commands (the Equifax breach). The
+      rule matches `%{` or `${` in the Content-Type, which no media type has.
+
+  - id: wf-cve-2017-9841
+    set: cve
+    phase: head
+    msg: "PHPUnit eval-stdin.php reached over HTTP (CVE-2017-9841)"
+    severity: critical
+    confidence: high
+    targets: [path]
+    transform: [lowercase]
+    operator: { contains_any: ['/util/php/eval-stdin.php'] }
+    action: block
+    tags: [OWASP_A06, cve, phpunit]
+    refs:
+      cve: [CVE-2017-9841]
+      cwe: [CWE-94]
+      capec: [CAPEC-242]
+      urls: ['https://nvd.nist.gov/vuln/detail/CVE-2017-9841']
+    doc: |
+      PHPUnit before 4.8.28 and 5.6.3 ships `src/Util/PHP/eval-stdin.php`, which evaluates the
+      request body as PHP; a `vendor/` directory published with the site makes it a web shell,
+      and bots POST `<?php ...` to `/vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php` and its
+      variants under other directories. The rule matches the script's path wherever it is (the
+      scanners set's wf-913-220 covers `/vendor/phpunit` only). No site serves this file on
+      purpose.
+
+  - id: wf-cve-2018-7600
+    set: cve
+    phase: head
+    msg: "Drupalgeddon2: a render array property as a parameter name (CVE-2018-7600)"
+    severity: critical
+    confidence: high
+    targets: [args_names]
+    transform: [url_decode, lowercase]
+    operator: { contains_any: ['#post_render', '#pre_render', '#lazy_builder', '#access_callback', '#markup'] }
+    action: block
+    tags: [OWASP_A06, cve, drupal]
+    refs:
+      cve: [CVE-2018-7600]
+      cwe: [CWE-20, CWE-94]
+      capec: [CAPEC-242]
+      urls: ['https://www.drupal.org/sa-core-2018-002']
+    doc: |
+      Drupal 7 before 7.58 and 8 before 8.5.1 merge request parameters into render arrays, whose
+      keys starting with `#` are callbacks: `mail[#post_render][]=exec&mail[#markup]=id` on the
+      registration form runs a command. The rule matches a parameter name, in the query or a
+      form, with `#post_render`, `#pre_render`, `#lazy_builder`, `#access_callback` or `#markup`.
+      Browsers never send `#` in a form field's name (Drupal's own forms do not either).
+
+  - id: wf-cve-2018-13379
+    set: cve
+    phase: head
+    msg: "Fortinet FortiOS SSL VPN path traversal in fgt_lang (CVE-2018-13379)"
+    severity: critical
+    confidence: high
+    targets: [args.lang]
+    transform: [url_decode, lowercase]
+    operator: { contains_any: ['/dev/cmdb/', 'sslvpn_websession'] }
+    action: block
+    tags: [OWASP_A06, cve, fortios]
+    refs:
+      cve: [CVE-2018-13379]
+      cwe: [CWE-22]
+      capec: [CAPEC-126]
+      urls: ['https://www.fortiguard.com/psirt/FG-IR-18-384']
+    doc: |
+      FortiOS SSL VPN 5.4 to 6.0.4: `/remote/fgt_lang?lang=/../../../..//////////dev/cmdb/sslvpn_websession`
+      reads the file of active sessions, with user names and passwords in clear. The rule
+      matches the `lang` parameter naming the configuration database (`/dev/cmdb/`) or the
+      session file. A language code never looks like this; the traversal itself is also scored
+      by the traversal set.
+
+  - id: wf-cve-2018-20062
+    set: cve
+    phase: head
+    msg: "ThinkPHP invokefunction through the router (CVE-2018-20062)"
+    severity: critical
+    confidence: high
+    targets: [args, path_raw]
+    transform: [url_decode, lowercase]
+    prefilter: ['invokefunction']
+    operator: { regex: 'think\\(?:app|container)/invokefunction' }
+    action: block
+    tags: [OWASP_A06, cve, thinkphp]
+    refs:
+      cve: [CVE-2018-20062]
+      cwe: [CWE-94]
+      capec: [CAPEC-242]
+      urls: ['https://nvd.nist.gov/vuln/detail/CVE-2018-20062']
+    doc: |
+      ThinkPHP 5.0 before 5.0.23 and 5.1 before 5.1.31 (and applications built on them, such as
+      NoneCMS) route `s=/index/\think\app/invokefunction&function=call_user_func_array&vars[0]=system&vars[1][]=id`
+      to any public method of any class, which runs a command. The rule matches
+      `think\app/invokefunction` or `think\container/invokefunction` in a parameter or the path,
+      a controller path no honest link has.
+
+  - id: wf-cve-2019-19781
+    set: cve
+    phase: head
+    msg: "Citrix ADC / Gateway path traversal to /vpns/ (CVE-2019-19781)"
+    severity: critical
+    confidence: high
+    targets: [path_raw]
+    transform: [url_decode, lowercase]
+    operator: { contains_any: ['../vpns/', '..\vpns/'] }
+    action: block
+    tags: [OWASP_A06, cve, citrix]
+    refs:
+      cve: [CVE-2019-19781]
+      cwe: [CWE-22]
+      capec: [CAPEC-126]
+      urls: ['https://support.citrix.com/article/CTX267027']
+    doc: |
+      Citrix ADC and Gateway (NetScaler) before the January 2020 fixes: `POST /vpn/../vpns/portal/scripts/newbm.pl`
+      reaches a Perl script without authentication, and with an `NSC_USER` header of `../` writes
+      a template that runs commands when it is fetched. The rule matches `../vpns/` in the path
+      as sent, after percent-decoding; a client normalizes `..` before sending, so only a crafted
+      request has it.
+
+  - id: wf-cve-2020-5902
+    set: cve
+    phase: head
+    msg: "F5 BIG-IP TMUI path traversal (..;/ after /tmui/) (CVE-2020-5902)"
+    severity: critical
+    confidence: high
+    targets: [path_raw]
+    transform: [url_decode, lowercase]
+    prefilter: ['..;']
+    operator: { regex: '/tmui/[^?]*\.\.;' }
+    action: block
+    tags: [OWASP_A06, cve, f5]
+    refs:
+      cve: [CVE-2020-5902]
+      cwe: [CWE-22]
+      capec: [CAPEC-126]
+      urls: ['https://my.f5.com/manage/s/article/K52145254']
+    doc: |
+      F5 BIG-IP's Traffic Management User Interface (11.6 to 15.1.0): Tomcat reads `..;/` as
+      `../`, so `/tmui/login.jsp/..;/tmui/locallb/workspace/fileRead.jsp?fileName=/etc/passwd`
+      reaches pages behind the login and runs commands. The rule matches `..;` after `/tmui/` in
+      the path. The traversal set's wf-930-100 also scores `..;/` anywhere.
+
+  - id: wf-cve-2021-34473
+    set: cve
+    phase: head
+    msg: "Microsoft Exchange ProxyShell / ProxyNotShell autodiscover SSRF (CVE-2021-34473, CVE-2022-41040)"
+    severity: critical
+    confidence: high
+    targets: [args]
+    transform: [url_decode, lowercase]
+    operator: { contains_any: ['autodiscover.json?@'] }
+    action: block
+    tags: [OWASP_A06, cve, exchange]
+    refs:
+      cve: [CVE-2021-34473, CVE-2022-41040]
+      cwe: [CWE-918]
+      capec: [CAPEC-664]
+      urls: ['https://msrc.microsoft.com/update-guide/vulnerability/CVE-2021-34473',
+             'https://msrc.microsoft.com/update-guide/vulnerability/CVE-2022-41040']
+    doc: |
+      Microsoft Exchange Server: the autodiscover endpoint takes an `Email` parameter of
+      `autodiscover/autodiscover.json?@x.com` as a path to proxy to, so
+      `/autodiscover/autodiscover.json?@x.com/mapi/nspi/?&Email=autodiscover/autodiscover.json%3f@x.com`
+      reaches the backend as SYSTEM (ProxyShell, chained to remote code execution;
+      ProxyNotShell, 2022, the same request with `PowerShell` as the protocol). The rule matches
+      `autodiscover.json?@` in a parameter value, after decoding: no mail client sends it.
+
+  - id: wf-cve-2021-41773
+    set: cve
+    phase: head
+    msg: "Apache HTTP Server 2.4.49 path traversal with an encoded dot (CVE-2021-41773)"
+    severity: critical
+    confidence: high
+    targets: [path_raw]
+    transform: [lowercase]
+    operator: { contains_any: ['/.%2e/', '/%2e./', '/%2e%2e/'] }
+    action: block
+    tags: [OWASP_A06, cve, apache]
+    refs:
+      cve: [CVE-2021-41773]
+      cwe: [CWE-22]
+      capec: [CAPEC-126]
+      crs: [930100]
+      urls: ['https://httpd.apache.org/security/vulnerabilities_24.html']
+    doc: |
+      Apache HTTP Server 2.4.49 normalized the path before decoding it, so a dot segment with an
+      encoded dot (`/.%2e/`) passed: `/cgi-bin/.%2e/.%2e/.%2e/bin/sh` runs a shell with CGI on,
+      `/icons/.%2e/%2e%2e/%2e%2e/etc/passwd` reads files. The rule matches a segment of two dots
+      of which at least one is `%2e`, in the path as sent. Clients do not percent-encode a dot,
+      an unreserved character; the false-positive risk is negligible.
+
+  - id: wf-cve-2021-42013
+    set: cve
+    phase: head
+    msg: "Apache HTTP Server 2.4.50 path traversal with a double-encoded dot (CVE-2021-42013)"
+    severity: critical
+    confidence: high
+    targets: [path_raw]
+    transform: [lowercase]
+    operator: { contains_any: ['%%32%65', '%%32e', '%2%65'] }
+    action: block
+    tags: [OWASP_A06, cve, apache]
+    refs:
+      cve: [CVE-2021-42013]
+      cwe: [CWE-22]
+      capec: [CAPEC-126]
+      urls: ['https://httpd.apache.org/security/vulnerabilities_24.html']
+    doc: |
+      Apache HTTP Server 2.4.50's fix of CVE-2021-41773 decoded once more and was bypassed by
+      encoding the escape itself: `%%32%65` (and `%%32e`, `%2%65`) becomes `%2e`, then `.`, as in
+      `/cgi-bin/.%%32%65/.%%32%65/bin/sh`. The rule matches those sequences in the path as sent,
+      which are not even valid percent-encoding: no client produces them.
+
+  - id: wf-cve-2022-1388
+    set: cve
+    phase: head
+    msg: "F5 BIG-IP iControl REST command endpoint (/mgmt/tm/util/bash) (CVE-2022-1388)"
+    severity: critical
+    confidence: high
+    targets: [path]
+    transform: [lowercase]
+    operator: { contains_any: ['/mgmt/tm/util/bash'] }
+    action: block
+    tags: [OWASP_A06, cve, f5]
+    refs:
+      cve: [CVE-2022-1388, CVE-2021-22986]
+      cwe: [CWE-306]
+      urls: ['https://my.f5.com/manage/s/article/K23605346']
+    doc: |
+      F5 BIG-IP iControl REST: a request with `Connection: X-F5-Auth-Token` and an empty token
+      passes authentication (CVE-2022-1388; CVE-2021-22986 before it was another bypass) and
+      `POST /mgmt/tm/util/bash` with `{"command":"run","utilCmdArgs":"-c id"}` runs a command
+      as root. The rule matches the command endpoint's path, which is the target of both
+      exploits. The management interface should never be behind a public site; one that does
+      proxy it for its administrators excludes the rule on `/mgmt/*`.
+
+  - id: wf-cve-2022-22963
+    set: cve
+    phase: head
+    msg: "Spring Cloud Function routing expression header (CVE-2022-22963)"
+    severity: critical
+    confidence: high
+    targets: [headers.spring.cloud.function.routing-expression]
+    transform: []
+    operator: exists
+    action: block
+    tags: [OWASP_A06, cve, spring]
+    refs:
+      cve: [CVE-2022-22963]
+      cwe: [CWE-917]
+      capec: [CAPEC-242]
+      urls: ['https://spring.io/security/cve-2022-22963']
+    doc: |
+      Spring Cloud Function 3.1.6, 3.2.2 and older evaluate the
+      `spring.cloud.function.routing-expression` header as SpEL, so
+      `T(java.lang.Runtime).getRuntime().exec("id")` in it runs a command on a POST to
+      `/functionRouter`. The rule matches the header's presence: routing by a client-sent
+      expression is what the fix took away, and a client of an application that still relies on
+      it is excluded by path.
+
+  - id: wf-cve-2022-22965
+    set: cve
+    phase: head
+    msg: "Spring4Shell: class.module.classLoader in a parameter name (CVE-2022-22965)"
+    severity: critical
+    confidence: high
+    targets: [args_names]
+    transform: [url_decode, lowercase]
+    operator: { contains_any: ['class.module.classloader'] }
+    action: block
+    tags: [OWASP_A06, cve, spring]
+    refs:
+      cve: [CVE-2022-22965]
+      cwe: [CWE-94]
+      capec: [CAPEC-242]
+      crs: [944260]
+      urls: ['https://spring.io/security/cve-2022-22965']
+    doc: |
+      Spring Framework 5.3.0 to 5.3.17 and 5.2.0 to 5.2.19 on JDK 9+: data binding follows
+      `class.module.classLoader...` from a parameter name to Tomcat's access log valve, and the
+      exploit rewrites it to write a JSP web shell
+      (`class.module.classLoader.resources.context.parent.pipeline.first.pattern=...`). The rule
+      matches a parameter name, in the query or a form, with `class.module.classLoader`; no form
+      field is named so.
+
+  - id: wf-cve-2022-26134
+    set: cve
+    phase: head
+    msg: "Atlassian Confluence OGNL injection in the path (CVE-2022-26134)"
+    severity: critical
+    confidence: high
+    targets: [path_raw]
+    transform: [url_decode, lowercase]
+    prefilter: ['${']
+    operator: { regex: '\$\{[^}]{0,500}?[(@#]' }
+    action: block
+    tags: [OWASP_A06, cve, confluence]
+    refs:
+      cve: [CVE-2022-26134]
+      cwe: [CWE-917]
+      capec: [CAPEC-242]
+      urls: ['https://nvd.nist.gov/vuln/detail/CVE-2022-26134']
+    doc: |
+      Atlassian Confluence Server and Data Center before 7.4.17, 7.13.7, 7.14.3, 7.15.2, 7.16.4,
+      7.17.4 and 7.18.1 evaluate the namespace of a request path as OGNL without
+      authentication: `/${(#a=@java.lang.Runtime@getRuntime().exec("id"))}/`, percent-encoded,
+      runs a command. The rule matches `${` followed by `(`, `@` or `#` in the decoded path.
+      A front end that requests an unfilled template literally (`/user/${id}`) has no `(`, `@` or
+      `#` there and is not matched.
+
+  - id: wf-cve-2022-42889
+    set: cve
+    phase: head
+    msg: "Text4Shell: Apache Commons Text script, dns or url lookup (CVE-2022-42889)"
+    severity: critical
+    confidence: high
+    targets: [args, cookies, headers, body]
+    transform: [url_decode, remove_nulls, lowercase, compress_whitespace]
+    operator: { contains_any: ['${script:', '${dns:', '${url:'] }
+    action: block
+    tags: [OWASP_A06, cve, commons-text]
+    refs:
+      cve: [CVE-2022-42889]
+      cwe: [CWE-94]
+      capec: [CAPEC-242]
+      urls: ['https://nvd.nist.gov/vuln/detail/CVE-2022-42889']
+    doc: |
+      Apache Commons Text 1.5 to 1.9 interpolate `${prefix:...}` in strings passed to
+      `StringSubstitutor`, and the `script` lookup runs JavaScript
+      (`${script:javascript:java.lang.Runtime.getRuntime().exec('id')}`), `dns` and `url` reach
+      out. The rule matches the three lookups in a parameter, a cookie, a header or the body.
+      Template syntax of this form is not in honest values.
+
+  - id: wf-cve-2023-46805
+    set: cve
+    phase: head
+    msg: "Ivanti Connect Secure authentication bypass through /api/v1/totp/user-backup-code/../ (CVE-2023-46805, CVE-2024-21887)"
+    severity: critical
+    confidence: high
+    targets: [path_raw]
+    transform: [url_decode, lowercase]
+    operator: { contains_any: ['/api/v1/totp/user-backup-code/..'] }
+    action: block
+    tags: [OWASP_A06, cve, ivanti]
+    refs:
+      cve: [CVE-2023-46805, CVE-2024-21887]
+      cwe: [CWE-287, CWE-77]
+      capec: [CAPEC-126]
+      urls: ['https://nvd.nist.gov/vuln/detail/CVE-2023-46805', 'https://nvd.nist.gov/vuln/detail/CVE-2024-21887']
+    doc: |
+      Ivanti Connect Secure and Policy Secure 9.x and 22.x: the unauthenticated
+      `/api/v1/totp/user-backup-code/` prefix followed by `../` reaches the authenticated REST
+      API (CVE-2023-46805), where `/api/v1/license/keys-status/;command` injects a command
+      (CVE-2024-21887); the two were chained in mass exploitation in 2024. The rule matches the
+      traversal out of the backup-code prefix in the path as sent.
+
+  - id: wf-cve-2024-3400
+    set: cve
+    phase: head
+    msg: "PAN-OS GlobalProtect SESSID cookie with a traversal or a command (CVE-2024-3400)"
+    severity: critical
+    confidence: high
+    targets: [cookies.SESSID]
+    transform: [url_decode, lowercase]
+    operator: { contains_any: ['../', '..\', '`', '$(', '${ifs}'] }
+    action: block
+    tags: [OWASP_A06, cve, panos]
+    refs:
+      cve: [CVE-2024-3400]
+      cwe: [CWE-77, CWE-22]
+      capec: [CAPEC-88]
+      urls: ['https://security.paloaltonetworks.com/CVE-2024-3400']
+    doc: |
+      Palo Alto Networks PAN-OS 10.2, 11.0 and 11.1 with GlobalProtect: the `SESSID` cookie is
+      used as a file name, so a `SESSID` of `/../../../opt/panlogs/tmp/device_telemetry/minute/`
+      and a name with a command in backticks creates a file whose name the telemetry job runs.
+      The rule matches `../`, a backtick, `$(` or `${IFS}` in a cookie named `SESSID`; a session
+      id is hex or base64.
+
+  - id: wf-cve-2024-4577
+    set: cve
+    phase: head
+    msg: "PHP-CGI argument injection through the query (CVE-2024-4577, CVE-2012-1823)"
+    severity: critical
+    confidence: high
+    targets: [query]
+    transform: [lowercase]
+    prefilter: [allow_url_include, auto_prepend_file, auto_append_file, safe_mode, open_basedir,
+                disable_functions, cgi.force_redirect, register_argc_argv]
+    operator:
+      regex: '(?:^|\+|%20)(?:%ad|-)d(?:\+|%20)+(?:allow_url_include|auto_prepend_file|auto_append_file|safe_mode|open_basedir|disable_functions|cgi\.force_redirect|register_argc_argv)'
+    action: block
+    tags: [OWASP_A06, cve, php]
+    refs:
+      cve: [CVE-2024-4577, CVE-2012-1823]
+      cwe: [CWE-78]
+      capec: [CAPEC-88]
+      urls: ['https://nvd.nist.gov/vuln/detail/CVE-2024-4577']
+    doc: |
+      PHP in CGI mode takes a query without `=` as command-line arguments (CVE-2012-1823); on
+      Windows with some code pages a soft hyphen (`%AD`) is read as `-`, past the fix
+      (CVE-2024-4577, PHP before 8.1.29, 8.2.20, 8.3.8). `?%ADd+allow_url_include%3d1+%ADd+auto_prepend_file%3dphp://input`
+      then runs the body as PHP. The rule matches `-d` or `%ADd` followed by one of the ini
+      directives these exploits set, in the query as sent.
+
+  - id: wf-cve-2024-36401
+    set: cve
+    phase: head
+    msg: "GeoServer property name evaluated as code (exec(java.lang.Runtime) (CVE-2024-36401)"
+    severity: critical
+    confidence: high
+    targets: [args, body]
+    transform: [url_decode, lowercase, compress_whitespace]
+    operator: { contains_any: ['exec(java.lang.runtime'] }
+    action: block
+    tags: [OWASP_A06, cve, geoserver]
+    refs:
+      cve: [CVE-2024-36401]
+      cwe: [CWE-95]
+      capec: [CAPEC-242]
+      urls: ['https://nvd.nist.gov/vuln/detail/CVE-2024-36401']
+    doc: |
+      GeoServer before 2.23.6, 2.24.4 and 2.25.2 evaluates the property names of OGC requests
+      (WFS `valueReference`, `propertyName`) as XPath through commons-jxpath, which calls Java:
+      `valueReference=exec(java.lang.Runtime.getRuntime(),'id')` runs a command, in a GET's
+      query or a POSTed XML request. The rule matches `exec(java.lang.Runtime` in a parameter or
+      the body; a feature property is never called so.
+
+  - id: wf-cve-2025-29927
+    set: cve
+    phase: head
+    msg: "Next.js middleware bypass: x-middleware-subrequest from a client (CVE-2025-29927)"
+    severity: critical
+    confidence: high
+    targets: [headers.x-middleware-subrequest]
+    transform: []
+    operator: exists
+    action: block
+    tags: [OWASP_A06, cve, nextjs]
+    refs:
+      cve: [CVE-2025-29927]
+      cwe: [CWE-285]
+      urls: ['https://nvd.nist.gov/vuln/detail/CVE-2025-29927']
+    doc: |
+      Next.js before 12.3.5, 13.5.9, 14.2.25 and 15.2.3 skips its middleware, where many sites
+      check authentication, for a request with the internal `x-middleware-subrequest` header
+      (`x-middleware-subrequest: middleware:middleware:middleware:middleware:middleware`). The
+      rule matches the header's presence: Next.js sets it on its own internal requests, never a
+      browser, and those do not pass through the proxy in front.

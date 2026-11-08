@@ -1,37 +1,56 @@
-# Set `xss` (wf-941-*): cross-site scripting. Script and embedding tags, script schemes, event
-# handler attributes, the DOM and functions a payload reaches for. On parameter values, cookies
-# and the body, after `url_decode html_decode js_decode remove_nulls lowercase compress_whitespace`;
-# wf-941-150 is libinjection's detector, also on the User-Agent and the Referer (the
-# `libinjection` feature; left out without it).
-# OWASP: A03 Injection.
+doc: |
+  Set `xss` (wf-941-*): cross-site scripting. Script and embedding tags, script schemes, event
+  handler attributes, the DOM and functions a payload reaches for, a tag split by another
+  (`<scr<script>ipt>`), a script scheme broken up by control characters or spaces. On parameter
+  values, cookies and the body, after `url_decode html_decode js_decode remove_nulls lowercase
+  compress_whitespace` (wf-941-170 keeps the whitespace to see it); wf-941-150 is libinjection's
+  detector, also on the User-Agent and the Referer (the `libinjection` feature; left out without
+  it).
+  OWASP: A03 Injection.
 rules:
   - id: wf-941-100
     set: xss
     phase: head
     msg: "HTML tag that runs or embeds script (script, svg, iframe, object, embed, meta http-equiv)"
     severity: critical
+    confidence: high
     targets: [args, cookies, body]
     transform: [url_decode, html_decode, js_decode, remove_nulls, lowercase, compress_whitespace]
     operator:
       contains_any: ['<script', '</script', '<svg', '<iframe', '<object', '<embed', '<meta http-equiv',
                      '<img src=x onerror']
     tags: [OWASP_A03, injection, xss]
+    refs: { cwe: [CWE-79], capec: [CAPEC-63], crs: [941110, 941160] }
+    doc: |
+      A `<script`, `<svg`, `<iframe`, `<object`, `<embed` or `<meta http-equiv` tag, after
+      percent, HTML-entity and JavaScript escapes are decoded: markup that runs script or loads a
+      document. A rich-text editor that posts HTML with embedded media (an `<iframe>` of a video,
+      an inline `<svg>`) is the false positive; its field is excluded by target, and the HTML
+      sanitized by the application.
 
   - id: wf-941-110
     set: xss
     phase: head
     msg: "Script scheme (javascript:, vbscript:, data:text/html)"
     severity: critical
+    confidence: high
     targets: [args, cookies, body]
     transform: [url_decode, html_decode, js_decode, remove_nulls, lowercase, compress_whitespace]
     operator: { contains_any: ['javascript:', 'vbscript:', 'data:text/html'] }
     tags: [OWASP_A03, injection, xss]
+    refs: { cwe: [CWE-79], capec: [CAPEC-63], crs: [941170] }
+    doc: |
+      `javascript:`, `vbscript:` or `data:text/html`: a URL that runs script where a link or a
+      redirect target is expected. "JavaScript: the good parts" in a search box is the false
+      positive (the colon right after the word), rare enough to exclude by target where it
+      happens.
 
   - id: wf-941-120
     set: xss
     phase: head
     msg: "Event handler attribute (onload=, onerror=, onmouseover=, ...)"
     severity: high
+    confidence: medium
     targets: [args, cookies, body]
     transform: [url_decode, html_decode, js_decode, remove_nulls, lowercase, compress_whitespace]
     prefilter: [onload, onerror, onmouseover, onmouseout, onmouseenter, onmouseleave, onmousedown,
@@ -44,27 +63,45 @@ rules:
     operator:
       regex: '(?:^|[^a-z0-9_])on(?:load|error|mouseover|mouseout|mouseenter|mouseleave|mousedown|mouseup|focus|blur|click|dblclick|keydown|keyup|keypress|submit|change|input|animationstart|animationend|transitionend|toggle|pointerover|pointerenter|pointerdown|wheel|scroll|resize|pageshow|beforeunload|unload|abort|readystatechange|message|hashchange|play|pause|ended|begin|drag|drop|cut|copy|paste|select|contextmenu|auxclick|loadstart)\s*='
     tags: [OWASP_A03, injection, xss]
+    refs: { cwe: [CWE-79], capec: [CAPEC-63], crs: [941120] }
+    doc: |
+      An event handler attribute (`onerror=`, `onload=`, `onfocus=`, ... about fifty names)
+      as a word followed by `=`: script run from an attribute, the vector when `<script` is
+      filtered. High, so it refuses with a second hit; a value of code or a query language
+      (`onclick = handler` in a developer forum) is the false positive.
 
   - id: wf-941-130
     set: xss
     phase: head
     msg: "Script payload reaching for the document, the location or an encoder"
     severity: high
+    confidence: medium
     targets: [args, cookies, body]
     transform: [url_decode, html_decode, js_decode, remove_nulls, lowercase, compress_whitespace]
     operator:
       contains_any: ['document.cookie', 'document.location', 'window.location', 'string.fromcharcode', 'expression(']
     tags: [OWASP_A03, injection, xss]
+    refs: { cwe: [CWE-79], capec: [CAPEC-63], crs: [941180] }
+    doc: |
+      What a script payload does once it runs: `document.cookie` to steal a session,
+      `document.location` / `window.location` to send it away, `String.fromCharCode` to build a
+      string past a filter, CSS `expression(`. Developer content mentions them; high, so a hit
+      alone does not refuse.
 
   - id: wf-941-140
     set: xss
     phase: head
     msg: "eval( or alert( in a parameter"
     severity: medium
+    confidence: low
     targets: [args, cookies, body]
     transform: [url_decode, html_decode, js_decode, remove_nulls, lowercase, compress_whitespace]
     operator: { contains_any: ['eval(', 'alert('] }
     tags: [OWASP_A03, injection, xss]
+    refs: { cwe: [CWE-79], capec: [CAPEC-63], crs: [941390] }
+    doc: |
+      `eval(` or `alert(`: the call every proof-of-concept payload makes. Low confidence (code
+      in a text field has it), and medium severity: it only adds to the other rules' hits.
 
   # libinjection's XSS detector (CRS 941100), on what has a tag's `<`, a script scheme,
   # `expression(` or an event handler's name (wf-941-120's list): an attribute broken out of with a
@@ -74,6 +111,7 @@ rules:
     phase: head
     msg: "XSS (libinjection)"
     severity: critical
+    confidence: high
     targets: [args, args_names, cookies, cookies_names, body.json, ua, headers.referer]
     transform: [url_decode, html_decode, js_decode, remove_nulls, lowercase, compress_whitespace]
     prefilter: ['<', 'javascript:', 'vbscript:', 'data:', 'expression(', onload, onerror, onmouseover,
@@ -85,3 +123,55 @@ rules:
                 ondrop, oncut, oncopy, onpaste, onselect, oncontextmenu, onauxclick, onloadstart, onstart]
     operator: detect_xss
     tags: [OWASP_A03, injection, xss, libinjection]
+    refs: { cwe: [CWE-79], capec: [CAPEC-63], crs: [941100] }
+    doc: |
+      libinjection's XSS detector, which parses a value as HTML in each context it could land in
+      (text, attribute, quoted attribute) and reports a tag, attribute or URL that runs script.
+      It runs on what the prefilter lets through: a `<`, a script scheme, `expression(` or an
+      event handler's name. Harmless markup (`<b>`, `<p>`, `<br>`) and `<3` are not reported; a
+      rich-text field is excluded by target as for wf-941-100.
+
+  # A tag name cut by another tag (`<scr<script>ipt>`, `<<script>`): a filter that strips
+  # `<script>` once leaves the outer tag whole. libinjection does not report it.
+  - id: wf-941-160
+    set: xss
+    phase: head
+    msg: "HTML tag split by another tag (<scr<script>ipt>)"
+    severity: high
+    confidence: medium
+    targets: [args, cookies, body]
+    transform: [url_decode, html_decode, js_decode, remove_nulls, lowercase, compress_whitespace]
+    prefilter: ['<']
+    operator: { regex: '<[a-z]{0,12}<[a-z]{1,12}[\s/>]' }
+    tags: [OWASP_A03, injection, xss]
+    refs: { cwe: [CWE-79], capec: [CAPEC-63] }
+    doc: |
+      A tag opened inside the name of another (`<scr<script>ipt>`, `<<script>`): when a filter
+      removes the inner `<script>` once, the outer one is left whole. `a < b`, `<3` and `x<<y`
+      do not match (letters must follow the second `<` and end at a space, `/` or `>`); code
+      with nested generics (`List<Map<String>>`) does, and is the false positive on a developer
+      site, which excludes its code fields by target.
+
+  # A script scheme with control characters (a tab, a newline: browsers drop them inside a URL)
+  # or a space between each letter, after entities are decoded (`jav&#x09;ascript:`). The chain
+  # keeps the whitespace: compress_whitespace would turn a tab into a space. The first alternative
+  # also matches a plain `javascript:`, as wf-941-110 does.
+  - id: wf-941-170
+    set: xss
+    phase: head
+    msg: "Script scheme broken up by control characters or spaces (jav&#x09;ascript:)"
+    severity: critical
+    confidence: high
+    targets: [args, cookies, body]
+    transform: [url_decode, html_decode, js_decode, remove_nulls, lowercase]
+    prefilter: [':']
+    operator:
+      regex: 'j[\x01-\x1f]*a[\x01-\x1f]*v[\x01-\x1f]*a[\x01-\x1f]*s[\x01-\x1f]*c[\x01-\x1f]*r[\x01-\x1f]*i[\x01-\x1f]*p[\x01-\x1f]*t[\x01-\x1f]*:|j\s+a\s+v\s+a\s+s\s+c\s+r\s+i\s+p\s+t\s*:|v[\x01-\x1f]*b[\x01-\x1f]*s[\x01-\x1f]*c[\x01-\x1f]*r[\x01-\x1f]*i[\x01-\x1f]*p[\x01-\x1f]*t[\x01-\x1f]*:'
+    tags: [OWASP_A03, injection, xss]
+    refs: { cwe: [CWE-79], capec: [CAPEC-63], crs: [941210] }
+    doc: |
+      `javascript:` or `vbscript:` with tabs, newlines or other control characters between the
+      letters (`java&#x09;script:`, `jav%0aascript:`), which browsers drop inside a URL, or with a
+      space between every letter: the scheme a filter looking for `javascript:` misses. "java
+      script course" and "JavaScript basics: part 1" do not match (no colon after the word, or
+      not every letter apart).

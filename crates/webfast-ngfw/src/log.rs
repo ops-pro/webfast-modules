@@ -5,6 +5,7 @@
 
 use super::compile::Compiled;
 use super::engine::Evaluation;
+use super::rule::Refs;
 use std::fmt::Write as _;
 use std::net::IpAddr;
 use webfast_core::accesslog::json_escape;
@@ -135,7 +136,21 @@ pub fn write(log: &EventLog, compiled: &Compiled, record: &Record<'_>) {
                 json_escape(line, &rule.id);
                 line.push_str(r#"","set":""#);
                 json_escape(line, &rule.set);
-                let _ = write!(line, r#"","score":{},"target":""#, rule.score);
+                let _ = write!(
+                    line,
+                    r#"","score":{},"severity":"{}""#,
+                    rule.score,
+                    rule.severity.name()
+                );
+                if let Some(confidence) = rule.confidence {
+                    let _ = write!(line, r#","confidence":"{}""#, confidence.name());
+                }
+                line.push_str(r#","tags":"#);
+                strings(line, &rule.tags);
+                if !rule.refs.is_empty() {
+                    refs(line, &rule.refs);
+                }
+                line.push_str(r#","target":""#);
                 json_escape(line, &hit.target);
                 line.push_str(r#"","matched":""#);
                 json_escape(line, &hit.matched);
@@ -156,6 +171,57 @@ pub fn write(log: &EventLog, compiled: &Compiled, record: &Record<'_>) {
     );
 }
 
+/// A JSON array of strings, written into `line`.
+fn strings<T: AsRef<str>>(line: &mut String, items: &[T]) {
+    line.push('[');
+    for (i, item) in items.iter().enumerate() {
+        if i > 0 {
+            line.push(',');
+        }
+        line.push('"');
+        json_escape(line, item.as_ref());
+        line.push('"');
+    }
+    line.push(']');
+}
+
+/// `,"refs":{...}` with the lists that are not empty.
+fn refs(line: &mut String, refs: &Refs) {
+    line.push_str(r#","refs":{"#);
+    let mut first = true;
+    let mut key = |line: &mut String, name: &str| {
+        if !first {
+            line.push(',');
+        }
+        first = false;
+        let _ = write!(line, r#""{name}":"#);
+    };
+    for (name, list) in [("cwe", &refs.cwe), ("capec", &refs.capec)] {
+        if !list.is_empty() {
+            key(line, name);
+            strings(line, list);
+        }
+    }
+    if !refs.crs.is_empty() {
+        key(line, "crs");
+        line.push('[');
+        for (i, id) in refs.crs.iter().enumerate() {
+            if i > 0 {
+                line.push(',');
+            }
+            let _ = write!(line, "{id}");
+        }
+        line.push(']');
+    }
+    for (name, list) in [("cve", &refs.cve), ("urls", &refs.urls)] {
+        if !list.is_empty() {
+            key(line, name);
+            strings(line, list);
+        }
+    }
+    line.push('}');
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::engine::Hit;
@@ -173,7 +239,7 @@ mod tests {
             dir.path(),
         );
         let compiled = super::super::engine::tests::compiled(
-            "rules:\n  - {id: wf-960-110, set: upload, phase: upload, severity: critical, targets: [upload.ext], operator: {equals_any: [php]}}\n",
+            "rules:\n  - {id: wf-960-110, set: upload, phase: upload, severity: critical, confidence: high, targets: [upload.ext], operator: {equals_any: [php]}, tags: [OWASP_A04, upload], refs: {cwe: [CWE-434], capec: [], crs: [933110]}}\n  - {id: plain, phase: upload, targets: [upload.ext], operator: {equals_any: [exe]}}\n",
             Mode::Block,
         );
         let (parts, ()) = http::Request::post("/upload?x=1")
@@ -189,6 +255,11 @@ mod tests {
             rule: 0,
             target: "upload.ext".into(),
             matched: "php".into(),
+        });
+        evaluation.hits.push(Hit {
+            rule: 1,
+            target: "upload.ext".into(),
+            matched: "exe".into(),
         });
         write(
             &log,
@@ -239,7 +310,14 @@ mod tests {
         assert_eq!(line["phase"], "upload");
         assert_eq!(
             line["hits"],
-            serde_json::json!([{"id": "wf-960-110", "set": "upload", "score": 5, "target": "upload.ext", "matched": "php"}])
+            serde_json::json!([
+                {"id": "wf-960-110", "set": "upload", "score": 5, "severity": "critical", "confidence": "high",
+                 "tags": ["OWASP_A04", "upload"], "refs": {"cwe": ["CWE-434"], "crs": [933110]},
+                 "target": "upload.ext", "matched": "php"},
+                {"id": "plain", "set": "site", "score": 3, "severity": "medium", "tags": [],
+                 "target": "upload.ext", "matched": "exe"}
+            ]),
+            "the refs' empty lists left out, no refs or confidence when the rule has none"
         );
         let line: serde_json::Value = serde_json::from_str(lines.next().unwrap()).unwrap();
         assert_eq!(line["decision"], "access");

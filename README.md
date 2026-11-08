@@ -20,13 +20,18 @@ docs/ngfw.md, docs/challenge.md
 ## The request filter: `webfast-ngfw`
 
 Requests refused, marked or logged by rules and by where they come from, on when `WEB_NGFW_CONFIG`
-names its YAML file. Eleven built-in sets of some seventy rules, numbered after the Core Rule Set
+names its YAML file. Twelve built-in sets of some hundred rules, numbered after the Core Rule Set
 sections: protocol anomalies, scanners and probes, path traversal, remote inclusion, command, PHP,
 SQL, template and script injection, file uploads, and error messages leaking in proxied responses
-(replaced by a 500 through `handle_errors` before the proxy cache keeps them). Access by the
+(replaced by a 500 through `handle_errors` before the proxy cache keeps them); and `cve`, known
+exploited vulnerabilities of web products (Spring4Shell, Confluence, Struts 2, Citrix, F5,
+Fortinet, Ivanti, PAN-OS, Next.js and others) by the signature of their exploit requests. Every
+rule has its severity, confidence, tags, CWE and CVE references and a description, written with
+each hit in the log; all of them are in [docs/ngfw-rules.md](docs/ngfw-rules.md), generated from
+the rule files (a test keeps the two in step). Access by the
 client's address (lists, files, feeds fetched on a schedule), country and ASN (MaxMind DB files),
 honeypot paths, and a ban list for repeat offenders. A site's own file extends, replaces, overrides
-or disables rules; `log_only` or `challenge` for the module, a set or a rule. The head decides
+or disables rules, by id, mask or tag; `log_only` or `challenge` for the module, a set or a rule. The head decides
 synchronously and a clean request allocates nothing; the body is read only when its type is listed
 and there are rules for it. One JSON line per event in its own log; a reload (SIGHUP) reads the file
 again and keeps the old rules when the new do not load.
@@ -53,7 +58,7 @@ that asks for one does not load. Its `libinjection` feature (on by default) brin
 SQL injection and XSS detectors (the `barbacane-libinjection` crate, pure Rust, BSD-3-Clause) as
 the operators `detect_sqli` and `detect_xss`, and two built-in rules on them (wf-942-170,
 wf-941-150), run only on values their prefilter lets through; without it a file whose rule uses
-them does not load and the two built-in rules are left out. [docs/ngfw.md](docs/ngfw.md).
+them does not load and the two built-in rules that use them are left out. [docs/ngfw.md](docs/ngfw.md).
 
 ## The browser challenge: `webfast-challenge`
 

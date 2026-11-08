@@ -14,7 +14,7 @@
 
 use super::config::{ExclusionConfig, Sourced};
 use super::iplist::IpSet;
-use super::rule::{Action, IdPattern, Mode, Operator, Phase, Rule, Target, Transform};
+use super::rule::{Action, Confidence, IdPattern, Mode, Operator, Phase, Refs, Rule, Severity, Target, Transform};
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder, AhoCorasickKind, MatchKind};
 use anyhow::{Context, Result, anyhow, bail};
 use http::{HeaderName, HeaderValue};
@@ -41,7 +41,12 @@ pub struct CompiledRule {
     pub headers: Vec<(HeaderName, HeaderValue)>,
     /// Exclusions that name this rule (by id or mask), its set, or everything.
     pub excluded_by: Vec<u32>,
+    /// What the log line's hit says of the rule besides its id, set and score.
+    pub severity: Severity,
     pub tags: Vec<String>,
+    /// As written; `None` (medium) is not logged.
+    pub confidence: Option<Confidence>,
+    pub refs: Refs,
 }
 
 /// How a rule decides, beyond the group's automaton.
@@ -477,6 +482,7 @@ pub fn compile(rules: &[Sourced], mode: Mode, exclusions: &[ExclusionConfig]) ->
     for (index, sourced) in rules.iter().enumerate() {
         let rule = &sourced.rule;
         let of = &rule.id;
+        rule.refs.check().map_err(|e| anyhow!("rule {of}: {e}"))?;
         let targets = targets_of(rule).with_context(|| format!("rule {of}"))?;
         let lowercase = rule.transform.contains(&Transform::Lowercase);
         let (matcher, literals) = matcher(sourced, lowercase).with_context(|| format!("rule {of}"))?;
@@ -622,7 +628,10 @@ pub fn compile(rules: &[Sourced], mode: Mode, exclusions: &[ExclusionConfig]) ->
             unless,
             headers,
             excluded_by,
+            severity: rule.severity,
             tags: rule.tags.clone(),
+            confidence: rule.confidence,
+            refs: rule.refs.clone(),
         });
     }
     for (plan, (list, _)) in plans.iter_mut().zip(patterns) {
@@ -822,6 +831,18 @@ rules:
             (
                 "rules:\n  - {id: a, phase: connection, operator: exists}\n",
                 "connection rule",
+            ),
+            (
+                "rules:\n  - {id: a, phase: head, targets: [ua], operator: exists, refs: {cwe: [CWE89]}}\n",
+                "rule a: refs.cwe: \"CWE89\" is not CWE-<number>",
+            ),
+            (
+                "rules:\n  - {id: a, phase: head, targets: [ua], operator: exists, refs: {crs: [9421]}}\n",
+                "rule a: refs.crs: 9421",
+            ),
+            (
+                "rules:\n  - {id: a, phase: head, targets: [ua], operator: exists, refs: {urls: ['ftp://x']}}\n",
+                "rule a: refs.urls",
             ),
         ];
         for (yaml, expected) in bad {

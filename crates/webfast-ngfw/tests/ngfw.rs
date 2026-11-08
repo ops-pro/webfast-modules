@@ -352,6 +352,40 @@ async fn built_in_sets_refuse_scanners_probes_and_injection_and_let_clean_reques
     h.shutdown().await;
 }
 
+/// A query parameter and a cookie without `=` (`?debug`, `Cookie: flag`) are ordinary: before
+/// 0.1.1 their empty value was no range of the request's text, and the head phase panicked.
+/// And a refusal's line names each hit's severity, tags and references.
+#[tokio::test]
+async fn a_pair_without_a_value_passes_and_a_hit_is_logged_with_its_references() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = start("mode: block\nlog:\n  output: ngfw.log\n", dir.path()).await;
+    let log = dir.path().join("ngfw.log");
+    for (uri, cookie) in [
+        ("/api/echo?debug", "flag"),
+        ("/api/echo?a=1&print&b=2", "a=1; flag; b=2"),
+    ] {
+        let response = h.get(uri, &[("cookie", cookie)]).await;
+        assert_eq!(response.status, 200, "{uri}: {}", response.text());
+    }
+    let sqli = h.get("/api/echo?q=1%20union%20select%20name%20from%20users", &[]).await;
+    assert_eq!(sqli.status, 403, "{}", sqli.text());
+    let line = log_line(&log, |l| l.contains("wf-942-100")).await;
+    let hit = line["hits"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|hit| hit["id"] == "wf-942-100")
+        .unwrap()
+        .clone();
+    assert_eq!(hit["severity"], "critical");
+    assert!(hit["tags"].as_array().unwrap().iter().any(|t| t == "sqli"), "{hit}");
+    assert!(
+        hit["refs"]["cwe"].as_array().unwrap().iter().any(|c| c == "CWE-89"),
+        "{hit}"
+    );
+    h.shutdown().await;
+}
+
 /// libinjection's rules (wf-942-170, wf-941-150): injections the other rules of their sets score
 /// under the threshold are refused, an apostrophe in a name is not.
 #[cfg(feature = "libinjection")]

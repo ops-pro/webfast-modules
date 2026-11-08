@@ -41,12 +41,22 @@ pub struct Rule {
     pub mode: Option<Mode>,
     #[serde(default)]
     pub tags: Vec<String>,
+    /// How rare false positives are (`high`, `medium`, `low`); a rule without one is `medium`.
+    /// Written in the log; no other effect yet.
+    pub confidence: Option<Confidence>,
+    /// CWE, CAPEC, CRS, CVE ids and advisory URLs (checked at load, `Refs::check`).
+    #[serde(default)]
+    pub refs: Refs,
+    /// What the rule catches, why its score, where false positives come from, how to exclude
+    /// it: for docs/ngfw-rules.md, not used by the server.
+    pub doc: Option<String>,
 }
 
-/// A rules file: `rules:` and its list.
+/// A rules file: its description (`doc`, for docs/ngfw-rules.md), `rules:` and its list.
 #[derive(Deserialize, Debug, Default)]
 #[serde(deny_unknown_fields)]
 pub struct RulesFile {
+    pub doc: Option<String>,
     #[serde(default)]
     pub rules: Vec<Rule>,
 }
@@ -114,6 +124,105 @@ impl Severity {
             Severity::Notice => 1,
         }
     }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Severity::Critical => "critical",
+            Severity::High => "high",
+            Severity::Medium => "medium",
+            Severity::Low => "low",
+            Severity::Notice => "notice",
+        }
+    }
+}
+
+/// How rare a rule's false positives are: the axis next to `severity` (what a hit means).
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Confidence {
+    /// An honest client practically never sends what the rule matches.
+    High,
+    #[default]
+    Medium,
+    /// A signal to add up with others rather than a verdict.
+    Low,
+}
+
+impl Confidence {
+    pub fn name(self) -> &'static str {
+        match self {
+            Confidence::High => "high",
+            Confidence::Medium => "medium",
+            Confidence::Low => "low",
+        }
+    }
+}
+
+/// What a rule refers to: weaknesses (CWE), attack patterns (CAPEC), the OWASP Core Rule Set's
+/// rules it corresponds to (CRS ids, numbers), vulnerabilities (CVE), advisories (URLs).
+#[derive(Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct Refs {
+    #[serde(default)]
+    pub cwe: Vec<String>,
+    #[serde(default)]
+    pub capec: Vec<String>,
+    #[serde(default)]
+    pub crs: Vec<u32>,
+    #[serde(default)]
+    pub cve: Vec<String>,
+    #[serde(default)]
+    pub urls: Vec<String>,
+}
+
+impl Refs {
+    pub fn is_empty(&self) -> bool {
+        self.cwe.is_empty()
+            && self.capec.is_empty()
+            && self.crs.is_empty()
+            && self.cve.is_empty()
+            && self.urls.is_empty()
+    }
+
+    /// Each value in its form: `CWE-<n>`, `CAPEC-<n>`, `CVE-<year>-<n of 4 digits or more>`, a
+    /// CRS id of six digits, an `https://` URL. The error names the field (`refs.cwe: ...`).
+    pub fn check(&self) -> Result<(), String> {
+        fn digits(text: &str, min: usize, max: usize) -> bool {
+            (min..=max).contains(&text.len()) && text.bytes().all(|b| b.is_ascii_digit())
+        }
+        for cwe in &self.cwe {
+            if !cwe.strip_prefix("CWE-").is_some_and(|n| digits(n, 1, 6)) {
+                return Err(format!("refs.cwe: {cwe:?} is not CWE-<number>"));
+            }
+        }
+        for capec in &self.capec {
+            if !capec.strip_prefix("CAPEC-").is_some_and(|n| digits(n, 1, 6)) {
+                return Err(format!("refs.capec: {capec:?} is not CAPEC-<number>"));
+            }
+        }
+        for crs in &self.crs {
+            if !(100_000..=999_999).contains(crs) {
+                return Err(format!("refs.crs: {crs} is not a CRS rule id (six digits)"));
+            }
+        }
+        for cve in &self.cve {
+            let valid = cve
+                .strip_prefix("CVE-")
+                .and_then(|rest| rest.split_once('-'))
+                .is_some_and(|(year, number)| digits(year, 4, 4) && digits(number, 4, 12));
+            if !valid {
+                return Err(format!("refs.cve: {cve:?} is not CVE-<year>-<number>"));
+            }
+        }
+        for url in &self.urls {
+            let valid =
+                url.strip_prefix("https://").is_some_and(|rest| !rest.is_empty()) && !url.contains(char::is_whitespace);
+            if !valid {
+                return Err(format!("refs.urls: {url:?} is not an https:// URL"));
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -131,6 +240,20 @@ pub enum Action {
     Challenge,
 }
 
+impl Action {
+    pub fn name(self) -> &'static str {
+        match self {
+            Action::Score => "score",
+            Action::Block => "block",
+            Action::Log => "log",
+            Action::Ban => "ban",
+            Action::Pass => "pass",
+            Action::Header => "header",
+            Action::Challenge => "challenge",
+        }
+    }
+}
+
 #[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Mode {
@@ -140,6 +263,16 @@ pub enum Mode {
     /// Every refusal by rule is the browser challenge instead (docs/challenge.md); needs the
     /// `challenge` feature.
     Challenge,
+}
+
+impl Mode {
+    pub fn name(self) -> &'static str {
+        match self {
+            Mode::Block => "block",
+            Mode::LogOnly => "log_only",
+            Mode::Challenge => "challenge",
+        }
+    }
 }
 
 #[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -156,6 +289,24 @@ pub enum Transform {
     JsDecode,
     CmdLine,
     Utf8ToUnicode,
+}
+
+impl Transform {
+    pub fn name(self) -> &'static str {
+        match self {
+            Transform::UrlDecode => "url_decode",
+            Transform::HtmlDecode => "html_decode",
+            Transform::Lowercase => "lowercase",
+            Transform::NormalizePath => "normalize_path",
+            Transform::RemoveNulls => "remove_nulls",
+            Transform::CompressWhitespace => "compress_whitespace",
+            Transform::RemoveComments => "remove_comments",
+            Transform::Base64Decode => "base64_decode",
+            Transform::JsDecode => "js_decode",
+            Transform::CmdLine => "cmd_line",
+            Transform::Utf8ToUnicode => "utf8_to_unicode",
+        }
+    }
 }
 
 /// What a rule looks at (docs/ngfw.md "Targets"), parsed from its text.
@@ -548,6 +699,109 @@ rules:
         assert!(
             webfast_core::yaml::from_str::<RulesFile>(
                 "rules:\n  - id: x\n    phase: head\n    operator: exists\n    bogus: 1\n"
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn metadata_reads_and_its_references_are_checked() {
+        let text = r#"
+doc: |
+  The set.
+rules:
+  - id: a
+    phase: head
+    targets: [args]
+    operator: { contains_any: [x] }
+    confidence: high
+    refs: { cwe: [CWE-89], capec: [CAPEC-66], crs: [942100], cve: [CVE-2021-44228], urls: ['https://example.com/a'] }
+    doc: |
+      What it catches.
+  - id: b
+    phase: head
+    targets: [args]
+    operator: { contains_any: [y] }
+"#;
+        let file: RulesFile = webfast_core::yaml::from_str(text).unwrap();
+        assert_eq!(file.doc.as_deref(), Some("The set.\n"));
+        let (a, b) = (&file.rules[0], &file.rules[1]);
+        assert_eq!(a.confidence, Some(Confidence::High));
+        assert_eq!(a.refs.crs, [942100]);
+        assert_eq!(a.refs.cve, ["CVE-2021-44228"]);
+        assert_eq!(a.doc.as_deref(), Some("What it catches.\n"));
+        assert!(a.refs.check().is_ok());
+        assert_eq!(b.confidence, None);
+        assert_eq!(
+            b.confidence.unwrap_or_default(),
+            Confidence::Medium,
+            "medium by default"
+        );
+        assert!(b.refs.is_empty() && b.refs.check().is_ok() && b.doc.is_none());
+        for (refs, field) in [
+            (
+                Refs {
+                    cwe: vec!["CWE89".into()],
+                    ..Refs::default()
+                },
+                "refs.cwe",
+            ),
+            (
+                Refs {
+                    cwe: vec!["cwe-89".into()],
+                    ..Refs::default()
+                },
+                "refs.cwe",
+            ),
+            (
+                Refs {
+                    capec: vec!["CAPEC-".into()],
+                    ..Refs::default()
+                },
+                "refs.capec",
+            ),
+            (
+                Refs {
+                    crs: vec![94210],
+                    ..Refs::default()
+                },
+                "refs.crs",
+            ),
+            (
+                Refs {
+                    cve: vec!["CVE-21-44228".into()],
+                    ..Refs::default()
+                },
+                "refs.cve",
+            ),
+            (
+                Refs {
+                    cve: vec!["CVE-2021-442".into()],
+                    ..Refs::default()
+                },
+                "refs.cve",
+            ),
+            (
+                Refs {
+                    urls: vec!["http://example.com".into()],
+                    ..Refs::default()
+                },
+                "refs.urls",
+            ),
+        ] {
+            let error = refs.check().unwrap_err();
+            assert!(error.starts_with(field), "{error}");
+        }
+        assert!(
+            webfast_core::yaml::from_str::<RulesFile>(
+                "rules:\n  - {id: x, phase: head, targets: [ua], operator: exists, refs: {cwes: [CWE-1]}}\n"
+            )
+            .is_err(),
+            "an unknown key under refs"
+        );
+        assert!(
+            webfast_core::yaml::from_str::<RulesFile>(
+                "rules:\n  - {id: x, phase: head, targets: [ua], operator: exists, confidence: certain}\n"
             )
             .is_err()
         );

@@ -1,17 +1,19 @@
-# Set `upload` (wf-960-*): file uploads (the `upload` phase, each multipart part with a
-# filename). Executable extensions anywhere in the name (double extensions too), names that
-# traverse or carry control characters, server configuration files, declared script types, a
-# declared image or PDF whose bytes are something else, a script or PHP tag at the start of a
-# file, too many parts.
-# OWASP: A04 Insecure Design (unrestricted file upload). A site that takes only images writes
-# its own `upload.ext` rule with `action: block` on everything not in its list
-# (docs/configuration.md, Request filter).
+doc: |
+  Set `upload` (wf-960-*): file uploads (the `upload` phase, each multipart part with a
+  filename). Executable extensions anywhere in the name (double extensions too), names that
+  traverse or carry control characters, server configuration files, declared script types, a
+  declared image or PDF whose bytes are something else, a script or PHP tag at the start of a
+  file, too many parts.
+  OWASP: A04 Insecure Design (unrestricted file upload). A site that takes only images writes
+  its own `upload.ext` rule with `action: block` on everything not in its list
+  (docs/configuration.md, Request filter).
 rules:
   - id: wf-960-100
     set: upload
     phase: upload
     msg: "Upload file name with a path separator, .., a null or a control character"
     severity: high
+    confidence: high
     targets: [upload.filename]
     transform: [url_decode]
     operator:
@@ -20,22 +22,35 @@ rules:
                      "\x12", "\x13", "\x14", "\x15", "\x16", "\x17", "\x18", "\x19", "\x1a", "\x1b",
                      "\x1c", "\x1d", "\x1e", "\x1f", "\x7f"]
     tags: [OWASP_A04, upload, traversal]
+    refs: { cwe: [CWE-22], capec: [CAPEC-126] }
+    doc: |
+      A file name with `/`, `\`, `..`, a null or a control character: a name meant to be written
+      outside the upload directory or to cut the extension a check reads. Browsers send the base
+      name alone. An old Internet Explorer sent the full Windows path (`C:\Users\...`), the
+      historical false positive.
 
   - id: wf-960-105
     set: upload
     phase: upload
     msg: "Upload file name over 255 bytes"
     severity: medium
+    confidence: medium
     targets: [upload.filename]
     transform: []
     operator: { length_gt: 255 }
     tags: [OWASP_A04, upload, size]
+    refs: { cwe: [CWE-20] }
+    doc: |
+      A file name longer than 255 bytes, more than most file systems store: truncation tricks
+      (a long name cut back to `.php`) and parser stress. Medium; a genuinely long name (a
+      document title in a non-Latin script, three bytes a character) adds only this.
 
   - id: wf-960-110
     set: upload
     phase: upload
     msg: "Executable extension in an uploaded file's name"
     severity: critical
+    confidence: high
     targets: [upload.ext]
     transform: [url_decode, remove_nulls, lowercase]
     prefilter: [php, phtml, pht, phar, phps, inc, htaccess, htpasswd, ini, cgi, pl, py, sh, bash, jsp,
@@ -47,54 +62,92 @@ rules:
       regex: '^(?:php[3-8]?|phtml|pht|phar|phps|inc|htaccess|htpasswd|ini|cgi|pl|py|sh|bash|jsp|jspx|asp|aspx|ashx|asmx|cer|soap|exe|dll|bat|cmd|com|scr|vbs|js|hta)(?:[^a-z0-9]|$)'
     action: block
     tags: [OWASP_A04, upload, webshell]
+    refs: { cwe: [CWE-434], capec: [CAPEC-650], crs: [933110] }
+    doc: |
+      An extension a server runs or a client executes (PHP in all its spellings, CGI, Perl,
+      Python, shell, JSP, ASP.NET, Windows executables and scripts, `.htaccess`, `.ini`, `.js`)
+      anywhere among the name's suffixes, so `shot.php.jpg`, `a.php;.jpg`, `a.php%00.jpg` and
+      `a.pHp` count. Blocks at once. A site that accepts code or executables on purpose (a
+      software repository, a CI artifact upload) excludes the rule on that endpoint.
 
   - id: wf-960-120
     set: upload
     phase: upload
     msg: "Server configuration file uploaded (.htaccess, .user.ini, web.config, php.ini)"
     severity: critical
+    confidence: high
     targets: [upload.filename]
     transform: [url_decode, remove_nulls, lowercase]
     operator: { equals_any: ['.htaccess', '.user.ini', 'web.config', 'php.ini'] }
     action: block
     tags: [OWASP_A04, upload, configuration]
+    refs: { cwe: [CWE-434], capec: [CAPEC-650], crs: [932180] }
+    doc: |
+      A file named `.htaccess`, `.user.ini`, `web.config` or `php.ini`: dropped in an upload
+      directory, it makes the server run the next upload as code. Blocks at once; no ordinary
+      upload has these names.
 
   - id: wf-960-130
     set: upload
     phase: upload
     msg: "Uploaded part declared as a PHP or shell script"
     severity: critical
+    confidence: high
     targets: [upload.type]
     transform: [lowercase, compress_whitespace]
     operator: { contains_any: ['application/x-php', 'application/x-httpd-php', 'text/x-php', 'application/x-sh'] }
     tags: [OWASP_A04, upload, webshell]
+    refs: { cwe: [CWE-434], capec: [CAPEC-650] }
+    doc: |
+      A file part whose declared Content-Type is PHP or a shell script. A browser takes the type
+      from the file's extension, so this is a script upload by name too, or a tool that says
+      what it sends. A code-hosting upload is the exception, excluded by path.
 
   - id: wf-960-140
     set: upload
     phase: upload
     msg: "Uploaded file starts with a PHP tag or a shebang (a polyglot when declared an image or document)"
     severity: high
+    confidence: medium
     targets: [upload.head]
     transform: []
     operator: { magic_is: [php, script] }
     tags: [OWASP_A04, upload, webshell, polyglot]
+    refs: { cwe: [CWE-434], capec: [CAPEC-650] }
+    doc: |
+      The file's first bytes (`upload_head`) have a PHP tag anywhere, or start with `#!`: a web
+      shell, often behind an image header (`GIF89a<?php ...`). High: a text or code upload that
+      legitimately contains `<?php` or a shell script adds this alone, and wf-960-150 brings the
+      second hit when the file pretends to be an image.
 
   - id: wf-960-150
     set: upload
     phase: upload
     msg: "Uploaded file declared an image or PDF whose bytes are not one"
     severity: high
+    confidence: medium
     targets: [upload.head]
     transform: []
     operator: { magic_not: [png, jpeg, gif, webp, pdf] }
     tags: [OWASP_A04, upload, mismatch]
+    refs: { cwe: [CWE-434], capec: [CAPEC-650] }
+    doc: |
+      A part declared `image/png`, `image/jpeg`, `image/gif`, `image/webp` or `application/pdf`
+      whose bytes do not start with that format's signature: a script dressed as an image.
+      Browsers declare the type by extension, so a mislabelled file (a WebP saved as `.jpg`)
+      matches too; high, so it refuses only with another hit.
 
   - id: wf-960-160
     set: upload
     phase: upload
     msg: "More than 64 file parts in a multipart body"
     severity: medium
+    confidence: medium
     targets: [upload.count]
     transform: []
     operator: { gt: 64 }
     tags: [OWASP_A04, upload, size]
+    refs: { cwe: [CWE-770] }
+    doc: |
+      More than 64 files in one request: parser and disk exhaustion. A bulk photo upload can
+      have more; its endpoint raises `body.multipart_max_parts` and the count by `override`.

@@ -1,37 +1,60 @@
-# Set `cmdi` (wf-932-*): operating system command injection. A shell metacharacter followed by a
-# command name, the shells and interpreters by path, a newline followed by a command.
-# OWASP: A03 Injection.
+doc: |
+  Set `cmdi` (wf-932-*): operating system command injection. A shell metacharacter followed by a
+  command name, the shells and interpreters by path, a newline followed by a command.
+  OWASP: A03 Injection.
 rules:
   - id: wf-932-100
     set: cmdi
     phase: head
     msg: "Shell metacharacter followed by a command name"
     severity: critical
+    confidence: medium
     targets: [args, cookies, body]
     transform: [url_decode, remove_nulls, lowercase, cmd_line]
     prefilter: [';', '|', '&', '`', '$(']
     operator:
       regex: '(?:[;|&`]|\$\()\s*(?:cat|ls|id|whoami|uname|wget|curl|nc|bash|sh|python[0-9.]*|perl|php[0-9.]*|chmod|rm|sleep|ping)(?:[^a-z0-9_-]|$)'
     tags: [OWASP_A03, injection, cmdi]
+    refs: { cwe: [CWE-78], capec: [CAPEC-88], crs: [932230, 932235] }
+    doc: |
+      `;`, `|`, `&`, a backtick or `$(` followed by one of the commands an injection runs first
+      (`id`, `whoami`, `cat`, `wget`, `curl`, `sleep`, a shell or interpreter), after `cmd_line`
+      removes the quotes and carets that split them. Medium confidence: prose can have it
+      ("salt & pepper; cat food", "R&D | ls"), as can a field of shell snippets on a developer
+      site; those parameters are excluded by target.
 
   - id: wf-932-110
     set: cmdi
     phase: head
     msg: "Shell or interpreter named by path"
     severity: critical
+    confidence: medium
     targets: [args, cookies, path_raw, body]
     transform: [url_decode, remove_nulls, lowercase, cmd_line]
     operator: { contains_any: ['/bin/sh', '/bin/bash', 'cmd.exe', 'powershell'] }
     tags: [OWASP_A03, injection, cmdi]
+    refs: { cwe: [CWE-78], capec: [CAPEC-88], crs: [932160] }
+    doc: |
+      `/bin/sh`, `/bin/bash`, `cmd.exe` or `powershell` anywhere in a value, the path or the body:
+      what a reverse shell or a command injection names to run its payload. A site about
+      programming or system administration (a search for "powershell script") hits it honestly;
+      it excludes the rule on its search and content parameters.
 
   - id: wf-932-120
     set: cmdi
     phase: head
     msg: "Newline (%0a) followed by a command name"
     severity: high
+    confidence: medium
     targets: [args, query, path_raw, cookies]
     transform: [url_decode, remove_nulls, lowercase]
     prefilter: ["\n"]
     operator:
       regex: '\n\s*(?:cat|ls|id|whoami|uname|wget|curl|nc|bash|sh|python[0-9.]*|perl|php[0-9.]*|chmod|rm|sleep|ping)(?:[^a-z0-9_-]|$)'
     tags: [OWASP_A03, injection, cmdi]
+    refs: { cwe: [CWE-78], capec: [CAPEC-88] }
+    doc: |
+      A newline followed by a command name: the newline ends the command a value was put into, and
+      the next line runs. A multi-line text field whose line starts with one of the words
+      ("ping me tomorrow", "cat photos") matches; such a field (a comment, a message) is excluded
+      by target if the site sees it.

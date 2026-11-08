@@ -6,7 +6,9 @@
 use super::ban::BanConfig;
 use super::geo::GeoConfig;
 use super::iplist::IpConfig;
-use super::rule::{Action, IdPattern, Mode, Operator, Phase, Rule, RulesFile, Severity, Target, Transform};
+use super::rule::{
+    Action, Confidence, IdPattern, Mode, Operator, Phase, Refs, Rule, RulesFile, Severity, Target, Transform,
+};
 use anyhow::{Context, Result, anyhow, bail};
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -169,6 +171,10 @@ pub struct RulesConfig {
     /// Ids, or masks with a trailing `*`.
     #[serde(default)]
     pub disable: Vec<String>,
+    /// Tags: every rule with one of them is disabled (after `disable`), as `disable_tags:
+    /// [wordpress]` turns off the probes of a WordPress site.
+    #[serde(default)]
+    pub disable_tags: Vec<String>,
     /// Fields of a rule changed in place (any but `id`); a mask as the key changes every rule it
     /// matches (so a whole set goes `log_only`).
     #[serde(default, rename = "override")]
@@ -246,6 +252,9 @@ pub struct Override {
     pub unless: Option<Vec<String>>,
     pub mode: Option<Mode>,
     pub tags: Option<Vec<String>>,
+    pub confidence: Option<Confidence>,
+    pub refs: Option<Refs>,
+    pub doc: Option<String>,
 }
 
 impl Override {
@@ -295,6 +304,15 @@ impl Override {
         }
         if let Some(v) = o.tags {
             rule.tags = v;
+        }
+        if let Some(v) = o.confidence {
+            rule.confidence = Some(v);
+        }
+        if let Some(v) = o.refs {
+            rule.refs = v;
+        }
+        if let Some(v) = o.doc {
+            rule.doc = Some(v);
         }
     }
 }
@@ -593,6 +611,24 @@ pub fn compose(config: &RulesConfig, base: &Path) -> Result<(Vec<Sourced>, Loade
             }
         }
     }
+    // A tag that names no rule left is a warning, as a mask that matches nothing: the sets'
+    // tags change with the binary.
+    for tag in &config.disable_tags {
+        if !rules.iter().any(|r| r.rule.tags.contains(tag)) {
+            loaded
+                .warnings
+                .push(format!("rules.disable_tags: {tag} matches no rule"));
+        }
+    }
+    if !config.disable_tags.is_empty() {
+        rules.retain(|r| {
+            let gone = r.rule.tags.iter().any(|t| config.disable_tags.contains(t));
+            if gone {
+                loaded.disabled.push(r.rule.id.clone());
+            }
+            !gone
+        });
+    }
     // Without libinjection its built-in rules are left out, after `override` and `disable` (which
     // may name them whatever the build); a site's own rule on a detector does not load (compile.rs).
     if !cfg!(feature = "libinjection") {
@@ -822,6 +858,50 @@ override:
         let (rules, loaded) = compose(&config, dir.path()).unwrap();
         assert!(rules.is_empty());
         assert_eq!(loaded.warnings.len(), 1, "a mask that matches nothing is a warning");
+    }
+
+    #[test]
+    fn disable_tags_takes_off_every_rule_with_a_tag() {
+        let config: RulesConfig = webfast_core::yaml::from_str(
+            "builtin: [scanners, cve]\ndisable: [wf-913-100]\ndisable_tags: [wordpress, spring, no-such-tag]\n",
+        )
+        .unwrap();
+        let (rules, loaded) = compose(&config, Path::new(".")).unwrap();
+        let ids: Vec<&str> = rules.iter().map(|r| r.rule.id.as_str()).collect();
+        assert!(!ids.contains(&"wf-913-200"), "the WordPress probe is off");
+        assert!(ids.contains(&"wf-913-210"), "the rest of the set stays");
+        assert!(
+            !ids.iter()
+                .any(|id| *id == "wf-cve-2022-22965" || *id == "wf-cve-2022-22963")
+        );
+        assert!(ids.contains(&"wf-cve-2021-41773"));
+        // Listed with `disable`'s ids, in the order they went.
+        assert_eq!(
+            loaded.disabled,
+            ["wf-913-100", "wf-913-200", "wf-cve-2022-22963", "wf-cve-2022-22965"]
+        );
+        assert!(
+            loaded
+                .warnings
+                .iter()
+                .any(|w| w == "rules.disable_tags: no-such-tag matches no rule"),
+            "{:?}",
+            loaded.warnings
+        );
+        assert!(!loaded.warnings.iter().any(|w| w.contains("wordpress")));
+    }
+
+    #[test]
+    fn an_override_changes_the_metadata_too() {
+        let config: RulesConfig = webfast_core::yaml::from_str(
+            "builtin: [sqli]\noverride:\n  wf-942-100: {confidence: low, refs: {cwe: [CWE-20]}, doc: changed}\n",
+        )
+        .unwrap();
+        let (rules, _) = compose(&config, Path::new(".")).unwrap();
+        let rule = &rules.iter().find(|r| r.rule.id == "wf-942-100").unwrap().rule;
+        assert_eq!(rule.confidence, Some(Confidence::Low));
+        assert_eq!(rule.refs.cwe, ["CWE-20"]);
+        assert_eq!(rule.doc.as_deref(), Some("changed"));
     }
 
     #[test]

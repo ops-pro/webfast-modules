@@ -1,16 +1,19 @@
-# Set `scanners` (wf-913-*): the tools and the probes. User-Agents of vulnerability scanners and
-# brute-forcers, the paths they try everywhere (dot-files, version control, WordPress, admin
-# tools, framework endpoints), backups left in the site root. Every rule blocks at once: nothing
-# of this comes from a browser or an honest client.
-# OWASP: A05 Security Misconfiguration (what the probes look for). A site that is what a rule
-# probes for turns it off: a WordPress site disables wf-913-200 (`disable: [wf-913-200]`), a
-# site with a real /actuator/ excludes wf-913-220 on that path (docs/configuration.md).
+doc: |
+  Set `scanners` (wf-913-*): the tools and the probes. User-Agents of vulnerability scanners and
+  brute-forcers, the paths they try everywhere (dot-files, version control, WordPress, admin
+  tools, framework endpoints), backups left in the site root. Every rule blocks at once: nothing
+  of this comes from a browser or an honest client.
+  OWASP: A05 Security Misconfiguration (what the probes look for). A site that is what a rule
+  probes for turns it off: a WordPress site disables wf-913-200 (`disable: [wf-913-200]`, or
+  `disable_tags: [wordpress]`), a site with a real /actuator/ excludes wf-913-220 on that path
+  (docs/configuration.md).
 rules:
   - id: wf-913-100
     set: scanners
     phase: head
     msg: "User-Agent of a vulnerability scanner"
     severity: critical
+    confidence: high
     targets: [ua]
     transform: [lowercase]
     operator:
@@ -18,35 +21,59 @@ rules:
                      acunetix, nessus, openvas, burp, havij, arachni, w3af, whatweb]
     action: block
     tags: [OWASP_A05, scanner, user-agent]
+    refs: { cwe: [CWE-200], capec: [CAPEC-541], crs: [913100] }
+    doc: |
+      A User-Agent that names a vulnerability scanner or brute-forcer: sqlmap, Nikto, Nuclei,
+      Nmap's scripts, WPScan and the rest of the list. Blocks at once. A site that has itself
+      scanned on purpose (a penetration test, an uptime service built on one of these tools)
+      allows the scanner's address (`access.ip.allow`) rather than turning the rule off; a
+      User-Agent that merely contains a listed word by accident (`burp` in a product name) is
+      the rare false positive.
 
   - id: wf-913-200
     set: scanners
     phase: head
     msg: "WordPress probe on a site that is not WordPress"
     severity: critical
+    confidence: high
     targets: [path]
     transform: [lowercase]
     operator: { contains_any: ['/wp-login.php', '/wp-admin/', '/xmlrpc.php'] }
     action: block
     tags: [OWASP_A05, scanner, probe, wordpress]
+    refs: { cwe: [CWE-307, CWE-200] }
+    doc: |
+      The WordPress login, admin and XML-RPC paths, which bots try on every site for password
+      guessing and plugin exploits. Blocks at once. On a WordPress site these are the site's own
+      pages: it turns the rule off (`disable: [wf-913-200]` or `disable_tags: [wordpress]`) and
+      keeps the others of the set.
 
   - id: wf-913-210
     set: scanners
     phase: head
     msg: "Probe for a dot-file: environment, version control, editor and cloud settings"
     severity: critical
+    confidence: high
     targets: [path]
     transform: [lowercase]
     operator:
       contains_any: ['/.env', '/.git/', '/.svn/', '/.hg/', '/.ds_store', '/.aws/', '/.htpasswd', '/.vscode/']
     action: block
     tags: [OWASP_A05, scanner, probe, dotfile]
+    refs: { cwe: [CWE-538, CWE-527], crs: [930130] }
+    doc: |
+      A request for `.env`, a version control directory, an editor's settings, AWS credentials or
+      `.htpasswd`, anywhere in the path: the files that hold secrets when a deployment publishes
+      its working tree. Blocks at once, whether the file exists or not. `/.well-known/` is not
+      matched. A path that only starts like one of these (`/.envoy/`, `/.environment.html`) is the
+      rare false positive; exclude the rule on it.
 
   - id: wf-913-220
     set: scanners
     phase: head
     msg: "Probe for an admin tool, a framework endpoint or a router interface"
     severity: critical
+    confidence: medium
     targets: [path]
     transform: [lowercase]
     operator:
@@ -54,15 +81,29 @@ rules:
                      '/vendor/phpunit', '/cgi-bin/', '/boaform/', '/hnap1']
     action: block
     tags: [OWASP_A05, scanner, probe, admin]
+    refs: { cwe: [CWE-200] }
+    doc: |
+      phpMyAdmin, Adminer, Spring Boot's actuator, Apache's server-status, PHPUnit in a vendor
+      directory, CGI scripts, and the router interfaces bots exploit (`/boaform/`, `/HNAP1`).
+      Blocks at once. Medium confidence: a site that really serves one of these (a CGI
+      application, an actuator behind the proxy) excludes the rule on that path
+      (`exclusions: [{paths: ['/actuator/*'], rules: [wf-913-220]}]`).
 
   - id: wf-913-230
     set: scanners
     phase: head
     msg: "Backup, dump or configuration file asked for in the site root"
     severity: critical
+    confidence: high
     targets: [path]
     transform: [lowercase]
     prefilter: ['.bak', '.sql', '.zip', '.tar.gz', '.old', '.orig', '.swp', '/config.json']
     operator: { regex: '^/(?:[^/]+\.(?:bak|sql|zip|tar\.gz|old|orig|swp)|config\.json)$' }
     action: block
     tags: [OWASP_A05, scanner, probe, backup]
+    refs: { cwe: [CWE-530], crs: [920440] }
+    doc: |
+      A backup, dump or archive in the root (`/backup.zip`, `/db.sql`, `/index.php.bak`,
+      `/site.tar.gz`) or `/config.json`: scanners guess these names to download a site's source
+      or database. Only at depth one, so `/downloads/app.zip` is not matched. A site that offers
+      a download in its root (`/release.zip`) moves it or excludes that path.

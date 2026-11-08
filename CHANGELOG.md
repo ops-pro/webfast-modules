@@ -2,11 +2,14 @@
 
 ## 0.1.1 — 2026-11-08
 
-The filter's second release: libinjection's SQL injection and XSS detectors as operators and two
-built-in rules on them, a query's `+` read as a space, the response phase streaming a 200 instead
-of holding it, the staged checks of webfast-core handing the head's state to the body by value, and
-fewer allocations on the body path. The webfast binary takes the detectors only when its `ngfw`
-feature names `webfast-ngfw/libinjection` (it pulls the crate without its default features).
+The filter's second release: a fix for requests with a parameter or a cookie without `=`, which
+made the head phase panic; libinjection's SQL injection and XSS detectors as operators and two
+built-in rules on them, and rules for what they let through; a `cve` set; every rule's severity,
+confidence, tags, CWE and CVE references and description, in the log and in a generated reference;
+a query's `+` read as a space; the response phase streaming a 200 instead of holding it; the staged
+checks of webfast-core handing the head's state to the body by value; and fewer allocations on the
+body path. The webfast binary takes the detectors only when its `ngfw` feature names
+`webfast-ngfw/libinjection` (it pulls the crate without its default features).
 
 - **Fixed: a query parameter or a cookie without `=` panicked the head phase.** `?debug`,
   `?a&b`, `Cookie: flag`: the empty value of such a pair was the literal `""`, not a slice of the
@@ -15,6 +18,39 @@ feature names `webfast-ngfw/libinjection` (it pulls the crate without its defaul
   out of bounds`), so with the filter on such a request lost its connection (0.1.0, and webfast
   0.1.3's binary). The empty value is now the slice at the pair's end. Tests: the pairs' ranges
   in debug and release, and `?debug` with `Cookie: flag` answered 200 through the server.
+- **Every rule describes itself** (docs/ngfw.md "The rule format"): `confidence` (`high`,
+  `medium`, `low`: how rare its false positives are, next to `severity`'s impact), `refs` (`cwe`,
+  `capec`, `crs`, `cve`, `urls`, each checked at load: a malformed one does not load) and `doc`;
+  a rules file has a `doc` of its own (the built-in sets' header comments became it). Every
+  built-in rule has a `doc`, a `confidence` and a CWE, a CAPEC where one fits and its CRS v4 rule
+  where one was checked against the CRS files (a test holds them to it). Each hit in the log now
+  names the rule's `severity`, `tags`, `confidence` and `refs`, written without an allocation.
+- **docs/ngfw-rules.md, the rules' reference, generated** from the rule files: per set its
+  description and a table, per rule its phase, targets, chain, operator, prefilter, score,
+  confidence, tags, links to CWE, CAPEC and NVD, and its `doc`; an index by CVE and by CWE. The
+  test `the_rules_reference_is_current` fails when the files and the reference differ;
+  `UPDATE_RULES_DOC=1` writes it again.
+- **`rules.disable_tags`**: every rule with one of the tags is left out (`disable_tags:
+  [wordpress]`), after `disable`; a tag no rule has is a warning.
+- **The `cve` set**: 21 rules, `wf-cve-<year>-<number>`, each blocking the narrow request
+  signature of a known, exploited vulnerability of a web product — Shellshock, Apache Struts 2,
+  PHPUnit eval-stdin, Drupalgeddon2, FortiOS, ThinkPHP, Citrix ADC, F5 BIG-IP TMUI and iControl
+  REST, Exchange ProxyShell and ProxyNotShell, Apache HTTP Server 2.4.49 and 2.4.50, Spring
+  Cloud Function, Spring4Shell, Confluence, Text4Shell, Ivanti Connect Secure, PAN-OS
+  GlobalProtect, PHP-CGI, GeoServer, Next.js middleware — with the CVE, CWE and advisory in
+  `refs` and the product in `tags` (`disable_tags: [f5]` for a site that is one). Tested on the
+  marker of each exploit's request and on an ordinary request to the same product.
+- **Rules for what libinjection lets through**: wf-942-180 (`procedure analyse(`, a stacked
+  `; shutdown`), wf-942-190 (a quote closed by a comment at the end of a value: `admin' #`),
+  wf-942-200 (a numeric tautology as the whole value: `1 or true`, `-1 or 2>1`), wf-941-160 (a
+  tag split by another: `<scr<script>ipt>`), wf-941-170 (a script scheme broken up by control
+  characters or spaces). wf-942-110 (`select … from`) now wants a column list between the two,
+  so "please select one option from the list" is not a hit. The sets together refuse every one
+  of the 115 payloads of the evaluation set as a query value (with `%20` and with `+`) and as a
+  cookie, and hit none of its 104 benign values with any rule (a test). 98 built-in rules, 72
+  before: a clean GET's connection and head phases take 3.69 µs where they took 3.36 (in
+  process, release, one core, alternated with the previous commit) and still allocate nothing
+  (tests/cost.rs counts).
 - **libinjection's detectors: the operators `detect_sqli` and `detect_xss`** (docs/ngfw.md
   "Operators"; the cargo feature `libinjection`, on by default: the `barbacane-libinjection`
   crate `=0.1.3`, pure Rust, BSD-3-Clause). They run on each value after the rule's

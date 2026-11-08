@@ -1,36 +1,59 @@
-# Set `traversal` (wf-930-*): path traversal and local file inclusion. `../` and `..\` in any
-# encoding, the files every traversal payload reaches for (/etc/passwd, win.ini, boot.ini),
-# `php://filter` and the `.../` sequence.
-# OWASP: A01 Broken Access Control.
+doc: |
+  Set `traversal` (wf-930-*): path traversal and local file inclusion. `../` and `..\` in any
+  encoding, the files every traversal payload reaches for (/etc/passwd, win.ini, boot.ini),
+  `php://filter` and the `.../` sequence.
+  OWASP: A01 Broken Access Control.
 rules:
   - id: wf-930-100
     set: traversal
     phase: head
     msg: "Directory traversal sequence (../ or ..\\) in the path, query or a cookie"
     severity: high
+    confidence: medium
     targets: [path_raw, query, args, cookies]
     transform: [url_decode, remove_nulls, lowercase, compress_whitespace]
     operator: { contains_any: ['../', '..\', '/..', '..;/'] }
     tags: [OWASP_A01, traversal, lfi]
+    refs: { cwe: [CWE-22], capec: [CAPEC-126], crs: [930100, 930110] }
+    doc: |
+      `../`, `..\`, `/..` or Tomcat's `..;/`, after percent-decoding, in the path, the query, a
+      parameter or a cookie: climbing out of a directory to read or include another file. High,
+      not critical, since relative paths are honest in some parameters (a `path=../shared` of a
+      file manager, a relative `return=` link); such a parameter is excluded by target
+      (`targets: [args.path]` on its path).
 
   - id: wf-930-110
     set: traversal
     phase: head
     msg: "Operating system file in a parameter or the path"
     severity: critical
+    confidence: high
     targets: [args, path, cookies]
     transform: [url_decode, normalize_path, remove_nulls, lowercase]
     operator:
       contains_any: ['/etc/passwd', '/etc/shadow', '/proc/self', '/windows/win.ini',
                      'c:/windows', 'c:\windows', 'boot.ini']
     tags: [OWASP_A01, traversal, lfi]
+    refs: { cwe: [CWE-22], capec: [CAPEC-126], crs: [930120] }
+    doc: |
+      The files a traversal or inclusion payload reads to prove it worked: `/etc/passwd`,
+      `/etc/shadow`, `/proc/self/...`, `win.ini`, `boot.ini`, the Windows directory. Critical:
+      one hit refuses. A documentation or support site whose texts name these files (a Linux
+      tutorial's search box) is the false positive; it excludes the rule on the parameter that
+      takes such text.
 
   - id: wf-930-120
     set: traversal
     phase: head
     msg: "php://filter wrapper or .../ sequence"
     severity: high
+    confidence: high
     targets: [args, path_raw, cookies]
     transform: [url_decode, remove_nulls, lowercase, compress_whitespace]
     operator: { contains_any: ['php://filter', '.../'] }
     tags: [OWASP_A01, traversal, lfi, php]
+    refs: { cwe: [CWE-22, CWE-98], capec: [CAPEC-126] }
+    doc: |
+      `php://filter`, which reads a PHP source through an inclusion (`php://filter/convert.base64-encode/resource=index.php`),
+      and `.../`, the sequence that becomes `../` after a filter strips `../` once. Neither
+      appears in honest values.

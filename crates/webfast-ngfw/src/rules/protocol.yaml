@@ -1,16 +1,18 @@
-# Set `protocol` (wf-920-*): protocol anomalies. Methods outside the usual seven, HTTP/1.0
-# without Host, control and non-UTF-8 bytes, nulls, double encoding, `..` that survives
-# normalization, oversized paths, queries, cookies and headers, too many parameters or cookies,
-# conflicting framing headers, a declared body type the bytes contradict, a POST without a
-# Content-Type, missing User-Agent and Accept, a Range with too many parts, JSON nested too deep.
-# OWASP: A05 Security Misconfiguration (requests no honest client sends). The `anomaly.*`
-# targets are facts the parser records while reading the request (docs/ngfw.md, Targets).
+doc: |
+  Set `protocol` (wf-920-*): protocol anomalies. Methods outside the usual seven, HTTP/1.0
+  without Host, control and non-UTF-8 bytes, nulls, double encoding, `..` that survives
+  normalization, oversized paths, queries, cookies and headers, too many parameters or cookies,
+  conflicting framing headers, a declared body type the bytes contradict, a POST without a
+  Content-Type, missing User-Agent and Accept, a Range with too many parts, JSON nested too deep.
+  OWASP: A05 Security Misconfiguration (requests no honest client sends). The `anomaly.*`
+  targets are facts the parser records while reading the request (docs/ngfw.md, Targets).
 rules:
   - id: wf-920-100
     set: protocol
     phase: head
     msg: "Method not in GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS"
     severity: medium
+    confidence: medium
     targets: [method]
     transform: []
     # The complement of the seven, since the regex syntax has no negative look-ahead. No
@@ -18,22 +20,38 @@ rules:
     operator:
       regex: '^(?:[^GHPDO]|G(?:[^E]|$)|GE(?:[^T]|$)|GET.|H(?:[^E]|$)|HE(?:[^A]|$)|HEA(?:[^D]|$)|HEAD.|P(?:[^OUA]|$)|PO(?:[^S]|$)|POS(?:[^T]|$)|POST.|PU(?:[^T]|$)|PUT.|PA(?:[^T]|$)|PAT(?:[^C]|$)|PATC(?:[^H]|$)|PATCH.|D(?:[^E]|$)|DE(?:[^L]|$)|DEL(?:[^E]|$)|DELE(?:[^T]|$)|DELET(?:[^E]|$)|DELETE.|O(?:[^P]|$)|OP(?:[^T]|$)|OPT(?:[^I]|$)|OPTI(?:[^O]|$)|OPTIO(?:[^N]|$)|OPTION(?:[^S]|$)|OPTIONS.)'
     tags: [OWASP_A05, protocol, method]
+    refs: { cwe: [CWE-650], capec: [CAPEC-274], crs: [911100] }
+    doc: |
+      A method other than the seven a web application uses: TRACE, CONNECT, PROPFIND, a made-up
+      verb, a lowercase `get`. Scanners send them to find a handler that treats an unknown verb
+      as GET and skips its checks (verb tampering). WebDAV (PROPFIND, MKCOL, LOCK) and CalDAV
+      clients send others honestly: a site that serves them excludes the rule on their paths
+      (`exclusions: [{paths: ['/dav/*'], rules: [wf-920-100]}]`). Medium, so it refuses only with
+      another hit.
 
   - id: wf-920-110
     set: protocol
     phase: head
     msg: "HTTP/1.0 request without a Host header"
     severity: medium
+    confidence: medium
     targets: [anomaly.http10_without_host]
     transform: []
     operator: exists
     tags: [OWASP_A05, protocol, host]
+    refs: { cwe: [CWE-20], crs: [920280] }
+    doc: |
+      An HTTP/1.0 request without Host: what simple scanners and scripts send, and what reaches
+      the default site of a server by its address. Browsers have sent Host since the nineties.
+      Old monitoring probes and load balancer health checks may still send bare HTTP/1.0; such a
+      probe is better given its own path and excluded there (or `disable: [wf-920-110]`).
 
   - id: wf-920-120
     set: protocol
     phase: head
     msg: "Control character in the path or a header"
     severity: high
+    confidence: high
     targets: [path_raw, headers]
     transform: []
     operator:
@@ -43,175 +61,288 @@ rules:
          "\x15", "\x16", "\x17", "\x18", "\x19", "\x1a", "\x1b", "\x1c", "\x1d",
          "\x1e", "\x1f", "\x7f"]
     tags: [OWASP_A05, protocol, encoding]
+    refs: { cwe: [CWE-20], crs: [920270, 920271] }
+    doc: |
+      A raw control byte (other than tab, line feed and carriage return) in the path as sent or
+      in a header value. No browser or HTTP library puts one there; they are used to confuse
+      parsers, logs and terminals. The HTTP parser refuses most of them already; the rule catches
+      what gets through. False positives are practically unknown.
 
   - id: wf-920-130
     set: protocol
     phase: head
     msg: "Byte sequence that is not UTF-8 in the path or a header"
     severity: medium
+    confidence: medium
     targets: [path_raw, headers]
     transform: [url_decode]
     operator: not_valid_utf8
     tags: [OWASP_A05, protocol, encoding]
+    refs: { cwe: [CWE-176], capec: [CAPEC-71], crs: [920250] }
+    doc: |
+      The path or a header, percent-decoded, is not valid UTF-8: overlong encodings (`%c0%af` for
+      `/`) and stray bytes are how filters that compare text are slipped past. Legacy clients
+      that send Latin-1 in a path (`%E9` for é) or in a header (some old download managers) are
+      the false positives; a site that has them lowers the score or excludes the path.
 
   - id: wf-920-140
     set: protocol
     phase: head
     msg: "Null byte (%00) in the path or query"
     severity: high
+    confidence: high
     targets: [path_raw, query]
     transform: []
     operator: { contains_any: ['%00'] }
     tags: [OWASP_A05, protocol, encoding]
+    refs: { cwe: [CWE-158], capec: [CAPEC-52], crs: [920270] }
+    doc: |
+      An encoded null in the path or the query: the classic cut of a file name (`../../etc/passwd%00.jpg`)
+      in code that hands strings to C. No form or link produces it. An API that takes binary
+      data in the query (rare, and better in a body) would need the rule excluded on its path.
 
   - id: wf-920-150
     set: protocol
     phase: head
     msg: "Double URL encoding"
     severity: medium
+    confidence: medium
     targets: [anomaly.double_encoding]
     transform: []
     operator: exists
     tags: [OWASP_A05, protocol, encoding]
+    refs: { cwe: [CWE-174], capec: [CAPEC-120], crs: [920230] }
+    doc: |
+      A `url_decode` of a value left percent-escapes that needed a second pass (`%252e`): a
+      payload encoded twice to pass a filter that decodes once and reach an application that
+      decodes again. Some applications put an encoded URL in a parameter of another (a
+      `redirect=` with its own query), which is honest double encoding; those parameters are
+      excluded by target (`exclusions: [{paths: [...], targets: [args.redirect]}]`).
 
   - id: wf-920-160
     set: protocol
     phase: head
     msg: "Path with `..` left after normalization"
     severity: medium
+    confidence: medium
     targets: [path_raw]
     transform: [url_decode, normalize_path, remove_nulls, lowercase]
     operator: { contains_any: ['..'] }
     tags: [OWASP_A05, protocol, path]
+    refs: { cwe: [CWE-22], capec: [CAPEC-126] }
+    doc: |
+      Two dots left in the path after `.` and `..` segments are resolved: `..` above the root,
+      `...`, or dots inside a segment (`/a..b`). Traversal attempts leave these; so do file names
+      with two dots in a row (`/files/report..pdf`, `/v1..2/`), the false positives, which a site
+      with such names excludes on their paths.
 
   - id: wf-920-170
     set: protocol
     phase: head
     msg: "Two Content-Length headers, or Content-Length with Transfer-Encoding"
     severity: critical
+    confidence: high
     targets: [anomaly.duplicate_content_length]
     transform: []
     operator: exists
     action: block
     tags: [OWASP_A05, protocol, smuggling]
+    refs: { cwe: [CWE-444], capec: [CAPEC-33], crs: [920181] }
+    doc: |
+      Conflicting framing: two Content-Length fields, or Content-Length with Transfer-Encoding.
+      This is how a request is smuggled past a proxy that reads one framing to a backend that
+      reads the other, so the rule blocks at once. RFC 9112 tells a server to treat it as an
+      error; no correct client sends it.
 
   - id: wf-920-180
     set: protocol
     phase: head
     msg: "Path over 2048 bytes"
     severity: medium
+    confidence: medium
     targets: [path_raw]
     transform: []
     operator: { length_gt: 2048 }
     tags: [OWASP_A05, protocol, size]
+    refs: { cwe: [CWE-400] }
+    doc: |
+      A path longer than 2048 bytes: overflow probes, fuzzers and payloads packed into the path.
+      Applications that put long state in the path (some single-page routers, signed asset URLs)
+      can pass it; they raise the limit with an override of their own (`override: {wf-920-180:
+      {operator: {length_gt: 8192}}}`) or exclude their paths.
 
   - id: wf-920-190
     set: protocol
     phase: head
     msg: "Query string over 8192 bytes"
     severity: medium
+    confidence: medium
     targets: [query]
     transform: []
     operator: { length_gt: 8192 }
     tags: [OWASP_A05, protocol, size]
+    refs: { cwe: [CWE-400] }
+    doc: |
+      A query longer than 8 KiB: payload stuffing, hash-collision and parser exhaustion attempts.
+      A large GET form or a search with a long filter state may reach it; such data belongs in a
+      POST body, and a site that cannot move it raises the limit by `override`.
 
   - id: wf-920-200
     set: protocol
     phase: head
     msg: "Cookie value over 8192 bytes"
     severity: medium
+    confidence: medium
     targets: [cookies]
     transform: []
     operator: { length_gt: 8192 }
     tags: [OWASP_A05, protocol, size]
+    refs: { cwe: [CWE-400] }
+    doc: |
+      One cookie value over 8 KiB, beyond what browsers keep for a cookie (4 KiB): written by a
+      client, not by a site. Large session cookies of some frameworks chunk themselves under the
+      limit; one that does not is excluded by its name (`targets: [cookies.<name>]`).
 
   - id: wf-920-210
     set: protocol
     phase: head
     msg: "Header value over 8192 bytes"
     severity: medium
+    confidence: medium
     targets: [headers]
     transform: []
     operator: { length_gt: 8192 }
     tags: [OWASP_A05, protocol, size]
+    refs: { cwe: [CWE-400] }
+    doc: |
+      A header value over 8 KiB: overflow probes and payloads carried in headers. The usual false
+      positive is a large bearer token or a Cookie header of many cookies on a busy domain; the
+      header is excluded by target (`targets: [headers.authorization]`) where that is the case.
 
   - id: wf-920-220
     set: protocol
     phase: head
     msg: "More than 128 parameters"
     severity: medium
+    confidence: medium
     targets: [args_count]
     transform: []
     operator: { gt: 128 }
     tags: [OWASP_A05, protocol, size]
+    refs: { cwe: [CWE-770], crs: [920380] }
+    doc: |
+      More than 128 parameters in the query and form together: hash-flooding and parameter
+      pollution. Large admin forms (permission matrices, bulk edits) can have more; their paths
+      are excluded, or the limit raised by `override`.
 
   - id: wf-920-230
     set: protocol
     phase: head
     msg: "More than 64 cookies"
     severity: medium
+    confidence: medium
     targets: [cookies]
     transform: []
     operator: { count_gt: 64 }
     tags: [OWASP_A05, protocol, size]
+    refs: { cwe: [CWE-770] }
+    doc: |
+      More than 64 cookies in one request. A domain with many analytics and advertising scripts
+      can accumulate that many, which is the false positive; otherwise it is cookie stuffing
+      against parsers. Raise the count by `override` on such a site.
 
   - id: wf-920-300
     set: protocol
     phase: head
     msg: "No User-Agent header"
     severity: notice
+    confidence: low
     targets: [ua]
     transform: []
     operator: missing
     tags: [OWASP_A05, protocol, headers]
+    refs: { cwe: [CWE-20], crs: [920320] }
+    doc: |
+      No User-Agent at all. Every browser sends one; many scripts and some API clients do not.
+      A notice, scored 1: it only adds to other hits. An API served to clients that omit it
+      excludes the rule on its paths.
 
   - id: wf-920-310
     set: protocol
     phase: head
     msg: "No Accept header"
     severity: notice
+    confidence: low
     targets: [headers.accept]
     transform: []
     operator: missing
     tags: [OWASP_A05, protocol, headers]
+    refs: { cwe: [CWE-20], crs: [920300] }
+    doc: |
+      No Accept header. Browsers always send one; scanners and simple scripts often do not, and
+      neither do some API and feed clients. A notice that only adds to other hits.
 
   - id: wf-920-400
     set: protocol
     phase: body
     msg: "Body does not match its declared Content-Type (JSON declared, not JSON)"
     severity: medium
+    confidence: high
     targets: [anomaly.body_type_mismatch]
     transform: []
     operator: exists
     tags: [OWASP_A05, protocol, body]
+    refs: { cwe: [CWE-20] }
+    doc: |
+      A body declared `application/json` that does not parse as JSON. A JSON client produces
+      JSON; a body that is something else is sent to make the filter skip parsing while the
+      application reads it another way. A body cut at `max_inspect` is not counted as invalid.
 
   - id: wf-920-410
     set: protocol
     phase: head
     msg: "POST without a Content-Type"
     severity: medium
+    confidence: medium
     targets: [anomaly.post_without_content_type]
     transform: []
     operator: exists
     tags: [OWASP_A05, protocol, body]
+    refs: { cwe: [CWE-20], crs: [920340] }
+    doc: |
+      A POST, PUT or PATCH with a body and no Content-Type: the body cannot be parsed for the
+      rules, which is why it is sent so. Some hand-written webhook senders and IoT clients omit
+      it; their endpoint is excluded by path.
 
   - id: wf-920-440
     set: protocol
     phase: head
     msg: "Range header with more than 16 parts"
     severity: medium
+    confidence: high
     targets: [headers.range]
     transform: [compress_whitespace]
     prefilter: [',']
     operator: { regex: '(?:,[^,]*){16}' }
     tags: [OWASP_A05, protocol, range]
+    refs: { cwe: [CWE-400], crs: [920200] }
+    doc: |
+      A Range header with more than 16 ranges: the "Apache Killer" style of exhausting a server
+      with overlapping ranges (CVE-2011-3192). Video players and PDF readers ask for one or a few
+      ranges. False positives are practically unknown.
 
   - id: wf-920-520
     set: protocol
     phase: body
     msg: "JSON body nested deeper than json_max_depth"
     severity: medium
+    confidence: medium
     targets: [anomaly.json_depth]
     transform: []
     operator: exists
     tags: [OWASP_A05, protocol, body]
+    refs: { cwe: [CWE-674] }
+    doc: |
+      A JSON body nested deeper than `body.json_max_depth` (20 by default): stack exhaustion of
+      recursive parsers. Deep documents are rare in forms and APIs; an API that takes them (a
+      tree editor, GeoJSON) raises `json_max_depth`.
