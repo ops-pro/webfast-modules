@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.1.1 — 2026-11-08
+
+The filter's second release: libinjection's SQL injection and XSS detectors as operators and two
+built-in rules on them, a query's `+` read as a space, the response phase streaming a 200 instead
+of holding it, the staged checks of webfast-core handing the head's state to the body by value, and
+fewer allocations on the body path. The webfast binary takes the detectors only when its `ngfw`
+feature names `webfast-ngfw/libinjection` (it pulls the crate without its default features).
 
 - **libinjection's detectors: the operators `detect_sqli` and `detect_xss`** (docs/ngfw.md
   "Operators"; the cargo feature `libinjection`, on by default: the `barbacane-libinjection`
