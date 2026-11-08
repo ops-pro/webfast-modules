@@ -2,7 +2,7 @@
 //! written in every log line so a line says which rules it came from.
 
 /// The date of the built-in sets.
-pub const BUILTIN_VERSION: &str = "2026-11-07";
+pub const BUILTIN_VERSION: &str = "2026-11-08";
 
 /// The sets in the order they are composed, with their text.
 pub const SETS: &[(&str, &str)] = &[

@@ -1,6 +1,8 @@
 # Set `xss` (wf-941-*): cross-site scripting. Script and embedding tags, script schemes, event
 # handler attributes, the DOM and functions a payload reaches for. On parameter values, cookies
-# and the body, after `url_decode html_decode js_decode remove_nulls lowercase compress_whitespace`.
+# and the body, after `url_decode html_decode js_decode remove_nulls lowercase compress_whitespace`;
+# wf-941-150 is libinjection's detector, also on the User-Agent and the Referer (the
+# `libinjection` feature; left out without it).
 # OWASP: A03 Injection.
 rules:
   - id: wf-941-100
@@ -63,3 +65,23 @@ rules:
     transform: [url_decode, html_decode, js_decode, remove_nulls, lowercase, compress_whitespace]
     operator: { contains_any: ['eval(', 'alert('] }
     tags: [OWASP_A03, injection, xss]
+
+  # libinjection's XSS detector (CRS 941100), on what has a tag's `<`, a script scheme,
+  # `expression(` or an event handler's name (wf-941-120's list): an attribute broken out of with a
+  # quote needs one of those to run script, so a quote alone (O'Brien) is not looked at.
+  - id: wf-941-150
+    set: xss
+    phase: head
+    msg: "XSS (libinjection)"
+    severity: critical
+    targets: [args, args_names, cookies, cookies_names, body.json, ua, headers.referer]
+    transform: [url_decode, html_decode, js_decode, remove_nulls, lowercase, compress_whitespace]
+    prefilter: ['<', 'javascript:', 'vbscript:', 'data:', 'expression(', onload, onerror, onmouseover,
+                onmouseout, onmouseenter, onmouseleave, onmousedown, onmouseup, onfocus, onblur, onclick,
+                ondblclick, onkeydown, onkeyup, onkeypress, onsubmit, onchange, oninput, onanimationstart,
+                onanimationend, ontransitionend, ontoggle, onpointerover, onpointerenter, onpointerdown,
+                onwheel, onscroll, onresize, onpageshow, onbeforeunload, onunload, onabort,
+                onreadystatechange, onmessage, onhashchange, onplay, onpause, onended, onbegin, ondrag,
+                ondrop, oncut, oncopy, onpaste, onselect, oncontextmenu, onauxclick, onloadstart, onstart]
+    operator: detect_xss
+    tags: [OWASP_A03, injection, xss, libinjection]

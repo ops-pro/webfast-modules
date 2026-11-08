@@ -22,6 +22,10 @@
 //! module asks with one `Asking` built from `response.challenge` at load; a client that passed
 //! (a good cookie) goes on with the hit logged as `challenge_passed`.
 //!
+//! With libinjection built (the `libinjection` feature, on by default: the barbacane-libinjection
+//! crate, detect.rs), the `detect_sqli` and `detect_xss` operators run its detectors on the values
+//! a rule's prefilter let through.
+//!
 //! What a clean GET costs: one `ArcSwap` load, the allow list and ban list lookups, the geo
 //! lookups when databases are given, and one pass of each head group's automaton over its target.
 
@@ -29,6 +33,7 @@ pub mod ban;
 pub mod body;
 pub mod compile;
 pub mod config;
+pub mod detect;
 pub mod engine;
 pub mod geo;
 pub mod iplist;

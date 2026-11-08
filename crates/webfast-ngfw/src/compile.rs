@@ -66,9 +66,18 @@ pub enum Matcher {
     NotValidJson,
     Exists,
     Missing,
+    /// `detect_sqli`, `detect_xss`: libinjection decides, after a `prefilter` literal was found
+    /// (once per text, as a regex), or on every value without one.
+    DetectSqli,
+    DetectXss,
 }
 
 impl Matcher {
+    /// Tested on the text after a `prefilter` literal led to it (a regex, a detector).
+    pub fn is_gated(&self) -> bool {
+        matches!(self, Matcher::Regex(_) | Matcher::DetectSqli | Matcher::DetectXss)
+    }
+
     /// Decided on the target as a whole (its count, its number, its presence, its raw bytes), not
     /// per text value.
     fn is_whole(&self) -> bool {
@@ -310,7 +319,7 @@ impl Compiled {
                     .pattern_rules
                     .iter()
                     .flatten()
-                    .any(|&(_, rule)| matches!(self.rules[rule as usize].matcher, Matcher::Regex(_)));
+                    .any(|&(_, rule)| self.rules[rule as usize].matcher.is_gated());
             let needed = literal.saturating_sub(1).max(if tested { window } else { 0 });
             carry = Some(carry.map_or(needed, |c| c.max(needed)));
         }
@@ -396,6 +405,14 @@ fn matcher(sourced: &Sourced, lowercase: bool) -> Result<(Matcher, Vec<String>)>
         Operator::NotValidJson => (Matcher::NotValidJson, Vec::new()),
         Operator::Exists => (Matcher::Exists, Vec::new()),
         Operator::Missing => (Matcher::Missing, Vec::new()),
+        Operator::DetectSqli => {
+            super::config::needs_libinjection("detect_sqli")?;
+            (Matcher::DetectSqli, lowered(&rule.prefilter, lowercase))
+        }
+        Operator::DetectXss => {
+            super::config::needs_libinjection("detect_xss")?;
+            (Matcher::DetectXss, lowered(&rule.prefilter, lowercase))
+        }
     })
 }
 
@@ -511,7 +528,7 @@ pub fn compile(rules: &[Sourced], mode: Mode, exclusions: &[ExclusionConfig]) ->
         let whole = matcher.is_whole();
         let needs_value_pass = match &matcher {
             Matcher::Literal => false,
-            Matcher::Regex(_) => literals.is_empty(),
+            Matcher::Regex(_) | Matcher::DetectSqli | Matcher::DetectXss => literals.is_empty(),
             _ => !whole,
         };
         // A `head` rule runs in the head phase on what the head has, and again in the body phase
@@ -822,6 +839,55 @@ rules:
         .unwrap();
         assert_eq!(implicit.plans[0].target, Target::Country);
         assert!(matches!(&implicit.rules[0].matcher, Matcher::CountryIn(codes) if codes == &[*b"KP"]));
+    }
+
+    #[test]
+    fn a_detector_is_gated_by_its_prefilter_as_a_regex_is() {
+        let yaml = "rules:\n  - {id: a, phase: head, targets: [args], transform: [lowercase], operator: detect_sqli, prefilter: [\"'\", UNION]}\n  - {id: b, phase: head, targets: [args], operator: detect_xss}\n";
+        let compiled = compile(&sourced(yaml), Mode::Block, &[]);
+        if !cfg!(feature = "libinjection") {
+            assert!(compiled.is_err(), "without libinjection a detector does not load");
+            return;
+        }
+        let compiled = compiled.unwrap();
+        assert!(matches!(compiled.rules[0].matcher, Matcher::DetectSqli));
+        let args = compiled
+            .plans
+            .iter()
+            .find(|p| p.phase == Phase::Head && p.target == Target::Args)
+            .unwrap();
+        let ac = args.automaton.as_ref().unwrap();
+        assert_eq!(
+            ac.patterns_len(),
+            2,
+            "the prefilter's literals, lowercased with the chain"
+        );
+        assert_eq!(args.chains[0].per_value, Vec::<u32>::new(), "gated: no per-value test");
+        assert_eq!(args.chains[1].per_value, [1], "no prefilter: tested on every value");
+    }
+
+    #[cfg(not(feature = "libinjection"))]
+    #[test]
+    fn a_detector_does_not_load_without_libinjection() {
+        for operator in ["detect_sqli", "detect_xss"] {
+            let yaml = format!("rules:\n  - {{id: a, phase: head, targets: [args], operator: {operator}}}\n");
+            let Err(error) = compile(&sourced(&yaml), Mode::Block, &[]) else {
+                panic!("{operator} compiled");
+            };
+            let error = format!("{error:#}");
+            assert!(
+                error.contains(&format!(
+                    "rule a: {operator}: this webfast was built without libinjection (cargo feature libinjection)"
+                )),
+                "{error}"
+            );
+        }
+        // The built-in sets load, without their rules on the detectors.
+        let config = super::super::config::RulesConfig::default();
+        let (rules, _) = super::super::config::compose(&config, Path::new(".")).unwrap();
+        assert!(!rules.iter().any(|r| r.rule.operator.is_libinjection()));
+        assert!(rules.iter().any(|r| r.rule.id == "wf-942-100"));
+        compile(&rules, Mode::Block, &[]).unwrap();
     }
 
     #[test]

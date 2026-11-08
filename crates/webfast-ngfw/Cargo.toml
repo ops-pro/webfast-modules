@@ -16,11 +16,15 @@ name = "webfast_ngfw"
 path = "src/lib.rs"
 
 [features]
-default = ["challenge"]
+default = ["challenge", "libinjection"]
 # The browser challenge as an answer (`action: challenge`, `mode: challenge`, `access.*.challenge`,
 # `access.ban.then: challenge`; docs/challenge.md "From the request filter"): the webfast-challenge
 # crate. Without the feature a file that asks for a challenge does not load.
 challenge = ["dep:webfast-challenge"]
+# The `detect_sqli` and `detect_xss` operators (docs/ngfw.md "Operators"): libinjection's detectors,
+# the barbacane-libinjection crate. Without the feature a file whose rule uses them does not load,
+# and the built-in rules that do (wf-942-170, wf-941-150) are left out of their sets.
+libinjection = ["dep:barbacane-libinjection"]
 
 [dependencies]
 # The core, with its HTTPS client: the feeds are read with it (src/iplist.rs).
@@ -29,6 +33,9 @@ webfast-challenge = { path = "../webfast-challenge", version = "0.1.0", optional
 # One automaton over every rule's literals (src/compile.rs); the regexes of the rules that need one.
 aho-corasick.workspace = true
 regex.workspace = true
+# libinjection's SQLi and XSS detectors, in Rust (lib name `libinjectionrs`; BSD-3-Clause), for
+# `detect_sqli` and `detect_xss` (src/detect.rs).
+barbacane-libinjection = { workspace = true, optional = true }
 # MaxMind DB files for countries and ASNs (src/geo.rs).
 maxminddb.workspace = true
 # The byte searches of the multipart parser (src/multipart.rs).

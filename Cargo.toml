@@ -24,6 +24,8 @@ aho-corasick = "1"
 anyhow = "1"
 arc-swap = "1"
 aws-lc-rs = { version = "1", default-features = false, features = ["aws-lc-sys", "prebuilt-nasm"] }
+# Pinned exactly: a new version of the detectors changes what is refused.
+barbacane-libinjection = "=0.1.3"
 blake3 = "1"
 bytes = "1"
 http = "1"

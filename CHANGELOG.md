@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- **libinjection's detectors: the operators `detect_sqli` and `detect_xss`** (docs/ngfw.md
+  "Operators"; the cargo feature `libinjection`, on by default: the `barbacane-libinjection`
+  crate `=0.1.3`, pure Rust, BSD-3-Clause). They run on each value after the rule's
+  transformations, gated by the rule's `prefilter` as a regex is, once per (rule, text); a SQLi
+  hit's `matched` starts with libinjection's fingerprint (`[s&sos] 1' or '1'='1`). Two built-in
+  rules, critical (one hit refuses): **wf-942-170** on args, cookies, their names and JSON
+  strings, gated by quotes, `=`, `(`, `;`, comments, `||`, `@@`, `union`, `select`; **wf-941-150**
+  on those and the User-Agent and Referer, gated by `<`, script schemes, `expression(` and event
+  handler names. On the crate's evaluation set they catch 60 of 65 SQL injections (61 ungated)
+  and 48 of 50 XSS payloads (48 ungated), with no false positive on 98 benign values (one
+  ungated), the SQLi gate opening on 46 of them and the XSS gate on 7. A clean request does not
+  reach them: a clean GET still allocates 6 times and costs the same; a 1 KiB form and a 4 KiB
+  upload allocate as before (37, 43). A query value with an apostrophe (`O'Brien`) is looked at
+  by the SQLi detector: about 3 µs and 15 allocations more. Without the feature a rule on a
+  detector does not load and the two built-in rules are left out. `BUILTIN_VERSION` 2026-11-08.
+- **A query's `+` is a space** (docs/ngfw.md "Targets"): `args` and `args_names` read a query
+  string as a form body is read, so a form sent by GET (`q=1+union+select`) is seen with its
+  spaces by every rule; `%2B` is still a `+`. Before, `url_decode` left the `+`, and the sets'
+  literals (`union select`) and libinjection missed such a value: the detectors caught 41 of 65
+  and 12 of 50 written so, now 60 and 47, as with `%20`. The query is copied once per request,
+  into the thread's buffer, only when it has a `+`; the `query` target stays as sent.
 - **The response phase streams a 200 and holds only a 5xx** (docs/ngfw.md "Response phase"). A
   covered 200 goes out at once: its status and header rules run before any byte (a hit replaces
   the response by `leak_status`, as before), then each body frame is scanned as it passes — the

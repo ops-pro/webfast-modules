@@ -1,7 +1,8 @@
 # Set `sqli` (wf-942-*): SQL injection. Statements and keywords no form value needs, the
 # time-based and file functions, tautologies, comment and quote tricks, stacked statements. On
 # parameter values and cookies, after `url_decode remove_nulls lowercase remove_comments
-# compress_whitespace` (wf-942-140 keeps the comments to see them).
+# compress_whitespace` (wf-942-140 keeps the comments to see them); wf-942-170 is libinjection's
+# detector on what its prefilter lets through (the `libinjection` feature; left out without it).
 # OWASP: A03 Injection.
 rules:
   - id: wf-942-100
@@ -79,3 +80,18 @@ rules:
     prefilter: [';']
     operator: { regex: ';\s*(?:drop|delete|update|insert)(?:[^a-z0-9_]|$)' }
     tags: [OWASP_A03, injection, sqli]
+
+  # libinjection's SQL injection detector (CRS 942100), on what one of the prefilter's literals
+  # occurs in: the quotes, `=`, `(`, `;`, comments, `||`, `@@`, `union`, `select`. An injection with
+  # none of them (`1 or true`, `-1 or 2>1`) is not looked at; a value of prose or numbers, the most
+  # of a site's values, is not either. Not on the User-Agent: a browser's has `(` and `;`.
+  - id: wf-942-170
+    set: sqli
+    phase: head
+    msg: "SQL injection (libinjection)"
+    severity: critical
+    targets: [args, args_names, cookies, cookies_names, body.json]
+    transform: [url_decode, remove_nulls, lowercase, compress_whitespace]
+    prefilter: ["'", '"', '`', '=', '(', ';', '--', '/*', '||', '@@', union, select]
+    operator: detect_sqli
+    tags: [OWASP_A03, injection, sqli, libinjection]

@@ -138,6 +138,17 @@ A client that passed (a good cookie of the level or above) is not asked: the
 hit is written as `challenge_passed` and the request goes on through the rules left, so a passed
 client is still refused by what refuses everyone.
 
+**libinjection** (this crate's cargo feature `libinjection`, on by default: the
+[`barbacane-libinjection`](https://crates.io/crates/barbacane-libinjection) crate, `=0.1.3`,
+BSD-3-Clause, a pure Rust port of libinjection without `unsafe`, tested against the C library on
+some 163,000 inputs). It brings the operators `detect_sqli` and `detect_xss` and the two built-in
+rules on them, wf-942-170 and wf-941-150. A rule of the site's that uses either operator is a
+configuration error in a webfast built without it (`… this webfast was built without libinjection
+(cargo feature libinjection)`); the two built-in rules are left out of their sets then (after
+`override` and `disable`, which may name them whatever the build), so the sets load. The webfast
+binary pulls this crate with `default-features = false` and names `challenge` alone: libinjection
+is in its build only when its `ngfw` feature also names `webfast-ngfw/libinjection`.
+
 **Composition.** The rule list is built in this order: the built-in sets named by `builtin`; the
 files of `include`, in order; then `override`, then `disable`. A rule in an included file with the
 `id` of an earlier rule **replaces** it, keeping its position; so one built-in rule is patched
@@ -218,8 +229,8 @@ to the id, `severity` to `medium`, `set` to `site` for a site's rules.
 | `path`              | the decoded, cleaned path (what `path` matchers see)                                |
 | `path_raw`          | the path as sent, before any decoding                                               |
 | `query`             | the query string as sent                                                            |
-| `args`              | every parameter value of the query and, in the `body` phase, of a form body         |
-| `args_names`        | every parameter name                                                                |
+| `args`              | every parameter value of the query and, in the `body` phase, of a form body; a query's `+` is read as a space (form encoding, as a form body's), `%2B` stays a `+` |
+| `args_names`        | every parameter name (a query's `+` a space, as for `args`)                         |
 | `args.<name>`       | the values of one parameter                                                         |
 | `args_count`        | the number of parameters (as text, for `gt`)                                        |
 | `headers`           | every header value (the request's)                                                  |
@@ -275,6 +286,14 @@ Exactly one per rule:
   `<?=` anywhere in the head; `script`: `#!` at the start).
 - `not_valid_utf8`, `not_valid_json` (body phase).
 - `exists` — the target has a value (a header is present); `missing` — it has none.
+- `detect_sqli`, `detect_xss` — libinjection's SQL injection and XSS detectors on each value, after
+  the rule's transformations (the `libinjection` feature). They are gated as a regex is: with
+  `prefilter: [literals]` a detector runs only on a value one of them occurs in, once per (rule,
+  text); without one, on every value (`validate` warns). A hit's `matched` is the value; for
+  `detect_sqli` libinjection's fingerprint comes first, in brackets (`[s&sos] 1' or '1'='1`), all
+  of it cut to `log.matched`. A call costs about 1 µs on a short value and 7 to 36 µs on a
+  kilobyte (SQLi; XSS 0.1 to 0.4 µs short, 7 to 20 µs a kilobyte), so the prefilter is what keeps
+  a clean request cheap.
 
 ### Actions
 
@@ -333,12 +352,36 @@ Every rule has `msg`, `severity`, `tags` with the OWASP category.
   `waitfor delay`, `information_schema`, `load_file(`, `into outfile`, `xp_cmdshell`,
   `/*!`, `--` with a quote before it, `;--`, `@@version`, `char(`, `concat(` with a quote, `0x` +
   hex of 8 digits with a quote; stacked `; drop|delete|update|insert`. Values and cookies, after
-  `url_decode lowercase remove_comments compress_whitespace`.
+  `url_decode lowercase remove_comments compress_whitespace`. And **wf-942-170** (critical, so
+  one hit refuses), libinjection's detector after CRS 942100, with the `libinjection` feature: on
+  `args args_names cookies cookies_names body.json`, after `url_decode remove_nulls lowercase
+  compress_whitespace` (CRS: `utf8toUnicode urlDecodeUni removeNulls`; the chain is wf-942-140's,
+  so a value goes through no chain more; comments are kept, libinjection reads them), gated by
+  `' " ` = ( ; -- /* || @@ union select`. Not on the User-Agent or the Referer, as CRS has it: a
+  browser's User-Agent has `(` and `;`, and the detector would run on every request.
 - **xss (941)** — `<script`, `</script`, `javascript:`, `vbscript:`, `data:text/html`, `on` +
   event name + `=` (`onload= onerror= onmouseover= onfocus= onclick=` …), `<svg`, `<iframe`,
   `<object`, `<embed`, `<img src=x onerror`, `document.cookie`, `document.location`,
   `window.location`, `eval(`, `alert(`, `String.fromCharCode`, `expression(`, `<meta
-  http-equiv`, after `url_decode html_decode js_decode lowercase compress_whitespace`.
+  http-equiv`, after `url_decode html_decode js_decode lowercase compress_whitespace`. And
+  **wf-941-150** (critical), libinjection's detector after CRS 941100: on the same targets and
+  `ua`, `headers.referer`, after the set's chain (CRS: `utf8toUnicode urlDecodeUni
+  htmlEntityDecode jsDecode cssDecode removeNulls`; ngfw has no `css_decode`), gated by `<`,
+  `javascript: vbscript: data: expression(` and the event handler names of wf-941-120 (and
+  `onstart`). A quote alone does not open the gate: an attribute broken out of needs one of these
+  to run script.
+
+  **What the gates trade**, measured on the crate's evaluation set (src/detect/corpus.rs: 65 SQL
+  injections, 50 XSS payloads, 98 benign values; the test `gates_by_measurement` prints it):
+  wf-942-170 catches 60 of the 65 as a form or cookie value (libinjection alone, ungated, 61: the
+  gate loses `-1 or 2>1`, which has no quote, `=` or parenthesis), with no false positive (ungated
+  one: `1 < 2 and 3 > 2`), and opens on 46 of the 98 benign values (names with apostrophes, `=`
+  and parentheses in text) instead of all of them; a gate of keywords as well (` or `, ` and `)
+  catches no more and opens on most prose. wf-941-150 catches 48 of the 50, as ungated, with no
+  false positive, and opens on 7 of the 98 benign values. libinjection itself misses `1 or true`,
+  `1 procedure analyse()`, `admin' #` and `'; shutdown--`, and `<scr<script>ipt>` and a tab
+  entity inside `javascript:`. As a query value (an HTML form's GET writes its spaces as `+`, read
+  as spaces: `args` above) the two catch 60 of the 65 and 47 of the 50, with `+` or `%20`.
 - **template (944)** — `{{`, `}}`, `${`, `#{`, `<%`, `%>` with a call inside (`(`), `__class__
   __globals__ __import__ __subclasses__ mro( lipsum cycler joiner`, `T(java.lang`, `freemarker`,
   `#set(`, `${jndi:` (critical, `block`).
@@ -372,7 +415,7 @@ line.
 One JSON line per event through the core's `webfast_core::eventlog`, extended with the module's fields:
 
 ```json
-{"level":"info","ts":1760788800.123,"logger":"ngfw","msg":"request refused","builtin":"2026-11-07",
+{"level":"info","ts":1760788800.123,"logger":"ngfw","msg":"request refused","builtin":"2026-11-08",
  "request":{"client_ip":"203.0.113.7","country":"NL","asn":1136,"method":"POST","host":"www.example.com",
             "uri":"/upload","user_agent":"Mozilla/5.0 …"},
  "decision":"block","status":403,"score":9,"threshold":5,"phase":"upload",
@@ -425,6 +468,15 @@ access log as any other.
   one shard; the sweep runs on the worker.
 - Nothing is allocated on the request path for a clean request but the body prefix when a body is
   inspected.
+- libinjection's detectors run only on what their rules' prefilters let through, and their
+  chains are the sets' own (wf-942-140's, wf-941-100's), so a value goes through no chain more.
+  Measured by the bench (release, one core, the filter on less off, the best of three; the
+  server's own allocations are the 6 of a GET): a clean GET, a 1 KiB form POST and a 4 KiB upload
+  allocate as without the rules (6, 37, 43) and cost the same within the bench's noise. A GET
+  with `q=O%27Brien+family` reaches the SQLi detector: 21 allocations (6 without the rule) and
+  about 3 µs more. The detector allocates as it reads: barbacane-libinjection 0.1.3 upper-cases
+  each word into a new `String` to look it up among the keywords, and formats a `String` for each
+  pair of words it tries to fold and for the fingerprint's lookup.
 
 ## Module layout and interfaces
 
@@ -435,6 +487,8 @@ crates/webfast-ngfw/src/
   config.rs     the YAML types (serde), sizes and durations, composition of the rule list
   rule.rs       Rule, Target, Transform, Operator, Action as parsed and as compiled
   compile.rs    the per-phase/per-target automata, regex sets, index from pattern to rules
+  detect.rs     libinjection's detectors (the `libinjection` feature) for `detect_sqli` and `detect_xss`;
+                detect/corpus.rs, the evaluation set of the detectors and their gates (tests)
   engine.rs     a request's evaluation: targets decoded into buffers, the phases, the decision
   body.rs       reading the body prefix, form/JSON parsing, handing the body on
   response.rs   the response phase: the inspect step, leak rules, the replacement response
@@ -575,8 +629,10 @@ covers (an image, a 304) are not read. Of the body, at most `body.max_inspect` b
 ## Tests
 
 - Unit tests in each file: parsing and composition (replace, override, disable, masks),
-  transformations, every operator, the automaton mapping patterns back to rules, the decision
-  with thresholds and modes, exclusions by path/host/target/set/rule, `when`/`unless`, prefix
+  transformations, every operator (the detectors: a hit, a miss, a value the prefilter keeps out
+  never reaching libinjection, and without the feature a load error; the built-in wf-942-170 and
+  wf-941-150 over the evaluation set, no hit on its benign values), the automaton mapping
+  patterns back to rules, the decision with thresholds and modes, exclusions by path/host/target/set/rule, `when`/`unless`, prefix
   tries with v4 and v6 and lists with comments, bans counting within the window and expiring,
   multipart parts from a cut prefix, geo with a small mmdb made in the test (the `maxminddb`
   crate's test data, or a writer-made file), the response inspection chaining the body.
@@ -590,7 +646,9 @@ covers (an image, a 304) are not read. Of the body, at most `body.max_inspect` b
   frames (the client has no whole response, the log has `leak`), a clean 200 passed frame for
   frame, a leak after `max_inspect` let through, `response.stream: false` replacing a 200,
   `log_only` passing it whole, a header rule replacing a 200 before any byte, and a site's own
-  rule replacing a built-in one. With the challenge built: a rule
+  rule replacing a built-in one. With libinjection built: a quoted SQL injection in a query and an
+  XSS in a form body that the other rules score under the threshold refused, a name with an
+  apostrophe let through. With the challenge built: a rule
   with `action: challenge` answers the page (503, a nonce, not the error page) and, with the cookie
   earned at `POST /.well-known/c-wf`, lets the request through with the hit written as
   `challenge_passed`; `mode: challenge` turns the built-in blocks into the page; `ban.then:

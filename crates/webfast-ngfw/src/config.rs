@@ -136,6 +136,16 @@ pub fn needs_challenge(what: &str) -> Result<()> {
     }
 }
 
+/// `Ok` when libinjection's detectors are built in (`detect_sqli`, `detect_xss`); the error that
+/// names `what` otherwise.
+pub fn needs_libinjection(what: &str) -> Result<()> {
+    if cfg!(feature = "libinjection") {
+        Ok(())
+    } else {
+        bail!("{what}: this webfast was built without libinjection (cargo feature libinjection)")
+    }
+}
+
 fn forbidden() -> u16 {
     403
 }
@@ -505,12 +515,17 @@ fn valid_id(id: &str) -> bool {
 pub fn compose(config: &RulesConfig, base: &Path) -> Result<(Vec<Sourced>, Loaded)> {
     let mut loaded = Loaded::default();
     let mut rules: Vec<Sourced> = Vec::new();
+    // The built-in rules on libinjection's detectors: left out at the end when it is not built.
+    let mut detecting: Vec<String> = Vec::new();
     for name in config.builtin.sets()? {
         let text = super::rules::set(name).expect("a listed set");
         for mut rule in parse_rules(text, &format!("built-in set {name}"))? {
             rule.set.get_or_insert_with(|| name.to_string());
             if rules.iter().any(|r| r.rule.id == rule.id) {
                 bail!("built-in set {name}: rule {} is defined twice", rule.id);
+            }
+            if rule.operator.is_libinjection() {
+                detecting.push(rule.id.clone());
             }
             rules.push(Sourced {
                 rule,
@@ -578,6 +593,15 @@ pub fn compose(config: &RulesConfig, base: &Path) -> Result<(Vec<Sourced>, Loade
             }
         }
     }
+    // Without libinjection its built-in rules are left out, after `override` and `disable` (which
+    // may name them whatever the build); a site's own rule on a detector does not load (compile.rs).
+    if !cfg!(feature = "libinjection") {
+        rules.retain(|r| {
+            !(r.rule.operator.is_libinjection()
+                && detecting.contains(&r.rule.id)
+                && !loaded.replaced.contains(&r.rule.id))
+        });
+    }
     for sourced in &rules {
         let rule = &sourced.rule;
         let set = rule.set.clone().unwrap_or_default();
@@ -588,6 +612,12 @@ pub fn compose(config: &RulesConfig, base: &Path) -> Result<(Vec<Sourced>, Loade
         if matches!(rule.operator, Operator::Regex(_)) && rule.prefilter.is_empty() {
             loaded.warnings.push(format!(
                 "rule {}: a regex without a prefilter runs on every request",
+                rule.id
+            ));
+        }
+        if rule.operator.is_libinjection() && rule.prefilter.is_empty() {
+            loaded.warnings.push(format!(
+                "rule {}: a libinjection detector without a prefilter runs on every value",
                 rule.id
             ));
         }
@@ -802,5 +832,28 @@ override:
         for rule in &rules {
             assert!(rule.rule.id.starts_with("wf-"), "{}", rule.rule.id);
         }
+        // libinjection's two, with prefilters (no warning), when it is built.
+        let detecting: Vec<&str> = rules
+            .iter()
+            .filter(|r| r.rule.operator.is_libinjection())
+            .map(|r| r.rule.id.as_str())
+            .collect();
+        if cfg!(feature = "libinjection") {
+            assert_eq!(detecting, ["wf-942-170", "wf-941-150"]);
+        } else {
+            assert!(detecting.is_empty());
+        }
+        assert!(!loaded.warnings.iter().any(|w| w.contains("libinjection")));
+        // `disable` and `override` name them whatever the build.
+        let config: RulesConfig = webfast_core::yaml::from_str(
+            "builtin: [sqli, xss]\ndisable: [wf-941-150]\noverride: {wf-942-170: {score: 4}}\n",
+        )
+        .unwrap();
+        let (rules, _) = compose(&config, Path::new(".")).unwrap();
+        assert!(!rules.iter().any(|r| r.rule.id == "wf-941-150"));
+        assert_eq!(
+            rules.iter().any(|r| r.rule.id == "wf-942-170"),
+            cfg!(feature = "libinjection")
+        );
     }
 }

@@ -352,6 +352,69 @@ async fn built_in_sets_refuse_scanners_probes_and_injection_and_let_clean_reques
     h.shutdown().await;
 }
 
+/// libinjection's rules (wf-942-170, wf-941-150): injections the other rules of their sets score
+/// under the threshold are refused, an apostrophe in a name is not.
+#[cfg(feature = "libinjection")]
+#[tokio::test]
+async fn libinjection_refuses_a_quoted_sqli_and_a_form_xss_and_lets_an_apostrophe_through() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = start("mode: block\nlog:\n  output: ngfw.log\n  matched: 100\n", dir.path()).await;
+    let log = dir.path().join("ngfw.log");
+
+    // wf-942-130 alone (`' or '`, high) is under the threshold; libinjection's rule is critical.
+    let sqli = h.get("/api/echo?id=1%27%20or%20%271%27%3D%271", &[]).await;
+    assert_eq!(sqli.status, 403, "{}", sqli.text());
+    let line = log_line(&log, |l| l.contains("wf-942-170")).await;
+    let hit = line["hits"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|hit| hit["id"] == "wf-942-170")
+        .unwrap()
+        .clone();
+    assert_eq!(hit["target"], "args");
+    let matched = hit["matched"].as_str().unwrap();
+    assert!(
+        matched.starts_with('[') && matched.ends_with("] 1' or '1'='1"),
+        "{matched}"
+    );
+
+    // In a form body: `alert(` alone (wf-941-140, medium) is under the threshold.
+    let xss = h
+        .send(
+            "POST",
+            "/api/echo",
+            &[("content-type", "application/x-www-form-urlencoded")],
+            b"name=alice&comment=%3Cmarquee+onstart%3Dalert(1)%3E",
+        )
+        .await;
+    assert_eq!(xss.status, 403, "{}", xss.text());
+    let line = log_line(&log, |l| l.contains("wf-941-150")).await;
+    assert_eq!(line["phase"], "body");
+
+    // A form sent by GET writes its spaces as `+`: read as spaces, as a form body's are.
+    let plus = h.get("/api/echo?id=1+union+select+password+from+users--", &[]).await;
+    assert_eq!(plus.status, 403, "{}", plus.text());
+    let xss_plus = h.get("/api/echo?q=%3Cimg+src%3Dx+onerror%3Dalert(1)%3E", &[]).await;
+    assert_eq!(xss_plus.status, 403, "{}", xss_plus.text());
+
+    // A name with an apostrophe, in the query and in a form.
+    let name = h.get("/api/echo?q=O%27Brien%27s%20pub&page=2", &[]).await;
+    assert_eq!(name.status, 200, "{}", name.text());
+    let name_plus = h.get("/api/echo?q=O%27Brien%27s+pub&page=2", &[]).await;
+    assert_eq!(name_plus.status, 200, "{}", name_plus.text());
+    let form = h
+        .send(
+            "POST",
+            "/api/echo",
+            &[("content-type", "application/x-www-form-urlencoded")],
+            b"name=Sin%C3%A9ad+O%27Connor&comment=it%27s+a+%22fine%22+day",
+        )
+        .await;
+    assert_eq!(form.status, 200, "{}", form.text());
+    h.shutdown().await;
+}
+
 #[tokio::test]
 async fn uploads_with_an_executable_extension_are_refused_and_images_pass() {
     let dir = tempfile::tempdir().unwrap();

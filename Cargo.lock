@@ -125,6 +125,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "barbacane-libinjection"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f53a7bc87cc063c13a8059eec7284e82774856d10425ac1374c274da0dae1562"
+dependencies = [
+ "bitflags",
+ "serde_json",
+ "smallvec",
+]
+
+[[package]]
 name = "bitflags"
 version = "2.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1523,7 +1534,7 @@ dependencies = [
 [[package]]
 name = "webfast-core"
 version = "0.1.3"
-source = "git+https://github.com/ops-pro/webfast?branch=dev-ci#1fd3c800486de41f6a304ae7e51359bdfa8e0089"
+source = "git+https://github.com/ops-pro/webfast?branch=dev-ci#6c527671f4fb7e4e31b85097305a45ae1b50fea9"
 dependencies = [
  "ahash",
  "anyhow",
@@ -1572,6 +1583,7 @@ dependencies = [
  "anyhow",
  "arc-swap",
  "aws-lc-rs",
+ "barbacane-libinjection",
  "bytes",
  "http",
  "http-body",

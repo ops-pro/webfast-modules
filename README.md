@@ -49,7 +49,11 @@ access:
 
 Its `challenge` feature (on by default) brings the browser challenge as an answer: `action:
 challenge`, `mode: challenge`, `access.*.challenge`, `access.ban.then: challenge`. Without it a file
-that asks for one does not load. [docs/ngfw.md](docs/ngfw.md).
+that asks for one does not load. Its `libinjection` feature (on by default) brings libinjection's
+SQL injection and XSS detectors (the `barbacane-libinjection` crate, pure Rust, BSD-3-Clause) as
+the operators `detect_sqli` and `detect_xss`, and two built-in rules on them (wf-942-170,
+wf-941-150), run only on values their prefilter lets through; without it a file whose rule uses
+them does not load and the two built-in rules are left out. [docs/ngfw.md](docs/ngfw.md).
 
 ## The browser challenge: `webfast-challenge`
 
@@ -88,7 +92,7 @@ example.com {
 ```sh
 cargo test --workspace                                   # unit tests and the end-to-end tests of both crates
 cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy -p webfast-ngfw --all-targets --no-default-features -- -D warnings   # the filter without the challenge
+cargo clippy -p webfast-ngfw --all-targets --no-default-features -- -D warnings   # the filter without the challenge and libinjection
 scripts/check.sh                                         # the CI checks, in Docker
 ```
 

@@ -403,6 +403,18 @@ pub enum Operator {
     NotValidJson,
     Exists,
     Missing,
+    /// libinjection's SQL injection detector on each value (src/detect.rs); needs the
+    /// `libinjection` feature.
+    DetectSqli,
+    /// libinjection's XSS detector on each value; needs the `libinjection` feature.
+    DetectXss,
+}
+
+impl Operator {
+    /// One of libinjection's detectors.
+    pub fn is_libinjection(&self) -> bool {
+        matches!(self, Operator::DetectSqli | Operator::DetectXss)
+    }
 }
 
 /// `[12345, AS6789]`: numbers, or `AS` and a number.

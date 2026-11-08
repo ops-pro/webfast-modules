@@ -40,7 +40,11 @@ pub(super) struct Buffers {
     match_path: String,
     /// The Host, port stripped, lowercased.
     host: String,
-    /// The query's pairs, as ranges in the query string.
+    /// The query with each `+` read as the space it stands for (form encoding, as a form body is
+    /// parsed): filled only when the query has a `+`; the pairs are then ranges in it.
+    query_text: String,
+    query_plus: bool,
+    /// The query's pairs, as ranges in the query string (or in `query_text`).
     query_pairs: Vec<Pair>,
     /// The Cookie headers joined by `;`, and the pairs as ranges in that.
     cookie_text: String,
@@ -92,7 +96,7 @@ pub(super) struct Fixed<'a> {
 }
 
 impl Fixed<'_> {
-    /// The query's pairs as sent (undecoded).
+    /// The query's pairs as sent but for `+`, which is a space (not percent-decoded).
     fn query_pairs(&self) -> impl Iterator<Item = (&str, &str)> {
         self.query_pairs.iter().map(|p| {
             (
@@ -154,7 +158,18 @@ fn prepare(parts: &http::request::Parts, b: &mut Buffers) {
     b.host.push_str(strip_port(hostport_of(parts)));
     b.host.make_ascii_lowercase();
     b.query_pairs.clear();
-    if let Some(query) = parts.uri.query() {
+    b.query_text.clear();
+    b.query_plus = false;
+    if let Some(raw) = parts.uri.query() {
+        // A `+` in a query is a space (an HTML form sent by GET writes its spaces so): the
+        // values are read as a form body's are, `%2B` still being a `+` once url_decode runs.
+        let query = if raw.contains('+') {
+            b.query_text.extend(raw.chars().map(|c| if c == '+' { ' ' } else { c }));
+            b.query_plus = true;
+            b.query_text.as_str()
+        } else {
+            raw
+        };
         for (name, value) in query_pairs(query) {
             b.query_pairs.push(Pair {
                 name: span(query, name),
@@ -410,6 +425,8 @@ impl Evaluation {
                 path,
                 match_path,
                 host,
+                query_text,
+                query_plus,
                 query_pairs,
                 cookie_text,
                 cookie_pairs,
@@ -439,7 +456,11 @@ impl Evaluation {
                     path,
                     match_path,
                     host,
-                    query: input.parts.uri.query().unwrap_or(""),
+                    query: if *query_plus {
+                        query_text.as_str()
+                    } else {
+                        input.parts.uri.query().unwrap_or("")
+                    },
                     query_pairs,
                     cookie_text,
                     cookie_pairs,
@@ -983,6 +1004,17 @@ impl Evaluation {
                     None => return,
                 }
             }
+            // The same for libinjection's detectors, which decide on the whole text.
+            (Matcher::DetectSqli | Matcher::DetectXss, Found::Hit(_)) => {
+                if tested.contains(&index) {
+                    return;
+                }
+                tested.push(index);
+                if test_value(&rule.matcher, text).is_none() {
+                    return;
+                }
+                0..text.len()
+            }
             (_, Found::Hit(range) | Found::Tested(range)) => range,
             (_, Found::Whole) => 0..0,
         };
@@ -999,6 +1031,12 @@ impl Evaluation {
         });
         let matched = if hidden {
             "REDACTED".to_string()
+        } else if matches!(rule.matcher, Matcher::DetectSqli) && log_matched > 0 {
+            // libinjection's fingerprint before the value (`[s&sos] 1' or '1'='1`): what it saw.
+            // Found again here, on a hit only.
+            let fingerprint = super::detect::sqli(text);
+            let shown = format!("[{}] {text}", fingerprint.as_ref().map_or("", |f| f.as_str()));
+            cut(&shown, log_matched).to_string()
         } else {
             cut(text.get(range).unwrap_or(""), log_matched).to_string()
         };
@@ -1156,6 +1194,8 @@ fn test_value(matcher: &Matcher, text: &str) -> Option<Range<usize>> {
             .is_ok_and(|n| numbers.contains(&n))
             .then(whole)
             .flatten(),
+        Matcher::DetectSqli => super::detect::sqli(text).and(whole()),
+        Matcher::DetectXss => super::detect::xss(text).then(whole).flatten(),
         _ => None,
     }
 }
@@ -2370,6 +2410,40 @@ rules:
     }
 
     #[test]
+    fn a_plus_in_a_query_is_a_space_and_an_escaped_one_a_plus() {
+        let c = compiled(RULES, Mode::Block);
+        // An HTML form sent by GET: spaces as `+`.
+        let parts = request("/s?q=1%27+UNION++SELECT+a+FROM+t&x=x1", &[("user-agent", "Mozilla")]);
+        let eval = evaluate(&parts);
+        assert_eq!(ids(&c, &eval), ["sqli", "sqli-re", "follow"]);
+        assert_eq!(eval.hits[0].matched, "union select");
+        // `%2B` is a `+` itself, not a space.
+        let parts = request(
+            "/s?q=1%27%2BUNION%2BSELECT%2Ba%2BFROM%2Bt&x=x1",
+            &[("user-agent", "Mozilla")],
+        );
+        let eval = evaluate(&parts);
+        assert!(!ids(&c, &eval).contains(&"sqli".to_string()), "{:?}", ids(&c, &eval));
+        // A name with a `+` is the name with a space, as a form's.
+        let mut buffers = Buffers::default();
+        prepare(&request("/s?a+b=c+d&e=f", &[]), &mut buffers);
+        assert!(buffers.query_plus);
+        let fixed_pairs: Vec<(&str, &str)> = buffers
+            .query_pairs
+            .iter()
+            .map(|p| {
+                (
+                    &buffers.query_text[p.name.0 as usize..p.name.1 as usize],
+                    &buffers.query_text[p.value.0 as usize..p.value.1 as usize],
+                )
+            })
+            .collect();
+        assert_eq!(fixed_pairs, [("a b", "c d"), ("e", "f")]);
+        prepare(&request("/s?e=f", &[]), &mut buffers);
+        assert!(!buffers.query_plus && buffers.query_text.is_empty());
+    }
+
+    #[test]
     fn block_pass_header_missing_count_and_anomaly_actions() {
         let c = compiled(RULES, Mode::Block);
         let parts = request("/", &[("user-agent", "Nikto/2.1")]);
@@ -2511,5 +2585,152 @@ rules:
         assert!(run("/x?q=sleep(1)", "legacy.example.com").is_empty(), "by set and host");
         assert!(run("/x?q=sleep(1)", "LEGACY.example.com:8080").is_empty());
         assert!(run("/off?q=sleep(1)", "www.example.com").is_empty(), "everything");
+    }
+
+    #[cfg(feature = "libinjection")]
+    mod libinjection {
+        use super::super::super::config::{RulesConfig, compose};
+        use super::super::super::detect::corpus::{BENIGN, SQLI, XSS};
+        use super::super::super::detect::{self, tests::query_encoded};
+        use super::*;
+
+        const DETECTORS: &str = r#"
+rules:
+  - id: sqli
+    phase: head
+    severity: critical
+    targets: [args, cookies]
+    transform: [url_decode, lowercase]
+    prefilter: ["'", '=']
+    operator: detect_sqli
+  - id: xss
+    phase: head
+    targets: [args]
+    transform: [url_decode, html_decode]
+    prefilter: ['<']
+    operator: detect_xss
+  - id: sqli-everywhere
+    phase: head
+    targets: [headers.x-raw]
+    operator: detect_sqli
+"#;
+
+        fn run(c: &Compiled, uri: &str, headers: &[(&str, &str)]) -> Evaluation {
+            let parts = request(uri, headers);
+            let input = input(&parts);
+            let mut eval = Evaluation::new();
+            eval.run_phase(c, Phase::Head, &input, 200);
+            eval
+        }
+
+        #[test]
+        fn the_detectors_run_on_what_their_prefilter_lets_through() {
+            let c = compiled(DETECTORS, Mode::Block);
+            let eval = run(&c, "/?id=1%27%20or%20%271%27%3D%271&page=2", &[]);
+            assert_eq!(ids(&c, &eval), ["sqli"]);
+            assert_eq!(eval.score, 5);
+            assert!(
+                eval.hits[0].matched.starts_with('[') && eval.hits[0].matched.ends_with("] 1' or '1'='1"),
+                "the fingerprint, then the value: {}",
+                eval.hits[0].matched
+            );
+            let eval = run(&c, "/?q=%3Cimg%20src%3Dx%20onerror%3Dalert(1)%3E", &[]);
+            assert!(ids(&c, &eval).contains(&"xss".to_string()), "{:?}", ids(&c, &eval));
+            let eval = run(&c, "/?name=O%27Brien&page=2", &[("cookie", "session=abc; pref=a=b")]);
+            assert!(eval.hits.is_empty(), "an apostrophe in a name is let through");
+            // No prefilter literal: the detector is not called, though it would say yes.
+            assert!(detect::sqli("1 union select password from users").is_some());
+            let before = detect::calls();
+            let eval = run(&c, "/?id=1%20union%20select%20password%20from%20users", &[]);
+            assert!(eval.hits.is_empty());
+            assert_eq!(detect::calls(), before, "gated out: libinjection never ran");
+            // Clean values, gathered for one pass: not called either.
+            let eval = run(
+                &c,
+                "/page?q=hello+world&id=42&sort=name",
+                &[("cookie", "session=abc123")],
+            );
+            assert!(eval.hits.is_empty());
+            assert_eq!(detect::calls(), before);
+            // Without a prefilter it runs on every value.
+            let eval = run(&c, "/", &[("x-raw", "1 union select password from users")]);
+            assert_eq!(ids(&c, &eval), ["sqli-everywhere"]);
+            assert!(detect::calls() > before);
+            // Once per (rule, text) however many literals the text has.
+            let before = detect::calls();
+            let eval = run(&c, "/?a=x%27%3D%27%3D%27%3D", &[]);
+            assert!(eval.hits.is_empty());
+            assert_eq!(detect::calls(), before + 1);
+        }
+
+        fn builtin() -> Compiled {
+            let (rules, _) = compose(&RulesConfig::default(), Path::new(".")).unwrap();
+            compile(&rules, Mode::Block, &[]).unwrap()
+        }
+
+        /// The built-in rules' hits for `value` as a query parameter (spaces as `%20`) and as a
+        /// cookie.
+        fn hits_of(c: &Compiled, value: &str, header: Option<&str>) -> Vec<String> {
+            let encoded = query_encoded(value, false);
+            let headers: Vec<(&str, &str)> = header.map(|h| vec![(h, value)]).unwrap_or_default();
+            let uri = if header.is_some() {
+                "/".to_string()
+            } else {
+                format!("/p?v={encoded}")
+            };
+            ids(c, &run(c, &uri, &headers))
+        }
+
+        #[test]
+        fn the_built_in_rules_catch_the_payloads_and_let_the_benign_values_through() {
+            let c = builtin();
+            let sqli = |v: &str| hits_of(&c, v, None).iter().any(|id| id == "wf-942-170");
+            let xss = |v: &str| hits_of(&c, v, None).iter().any(|id| id == "wf-941-150");
+            for payload in [
+                "' or '1'='1",
+                "1' or '1'='1",
+                "1 or 1=1",
+                "admin'--",
+                "1 UNION ALL SELECT username,password FROM users",
+                "1 UnIoN/**/SeLeCt 1,2",
+                "'||(select 1)||'",
+                "1;drop table users",
+                "1 AND (SELECT 1 FROM (SELECT SLEEP(5))a)",
+            ] {
+                assert!(sqli(payload), "{payload}");
+            }
+            let caught = SQLI.iter().filter(|p| sqli(p)).count();
+            assert!(caught >= 58, "{caught} of {} SQL injections", SQLI.len());
+            for payload in [
+                "<script>alert(1)</script>",
+                "<img src=x onerror=alert(1)>",
+                "\"><svg/onload=alert(1)>",
+                "\" onmouseover=\"alert(1)",
+                "&lt;script&gt;alert(1)&lt;/script&gt;",
+                "\\x3cscript\\x3ealert(1)\\x3c/script\\x3e",
+            ] {
+                assert!(xss(payload), "{payload}");
+            }
+            let caught = XSS.iter().filter(|p| xss(p)).count();
+            assert!(caught >= 46, "{caught} of {} XSS", XSS.len());
+            // In a cookie too; in the User-Agent and Referer the XSS rule.
+            let cookie = |v: &str| run(&c, "/", &[("cookie", &format!("c={v}"))]);
+            assert!(ids(&c, &cookie("1'%20or%20'1'%3D'1")).contains(&"wf-942-170".to_string()));
+            let ua = hits_of(&c, "Mozilla/5.0 <script>alert(1)</script>", Some("user-agent"));
+            assert!(ua.contains(&"wf-941-150".to_string()), "{ua:?}");
+            let referer = hits_of(&c, "https://x.test/?q=%3Csvg%20onload%3Dalert(1)%3E", Some("referer"));
+            assert!(referer.contains(&"wf-941-150".to_string()), "{referer:?}");
+            for value in BENIGN {
+                let hits = hits_of(&c, value, None);
+                assert!(
+                    !hits.iter().any(|id| id == "wf-942-170" || id == "wf-941-150"),
+                    "{value}: {hits:?}"
+                );
+            }
+            for ua in BENIGN.iter().filter(|v| v.contains('/')) {
+                let hits = hits_of(&c, ua, Some("user-agent"));
+                assert!(!hits.iter().any(|id| id == "wf-941-150"), "{ua}: {hits:?}");
+            }
+        }
     }
 }
