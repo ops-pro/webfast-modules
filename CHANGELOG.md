@@ -8,6 +8,13 @@ of holding it, the staged checks of webfast-core handing the head's state to the
 fewer allocations on the body path. The webfast binary takes the detectors only when its `ngfw`
 feature names `webfast-ngfw/libinjection` (it pulls the crate without its default features).
 
+- **Fixed: a query parameter or a cookie without `=` panicked the head phase.** `?debug`,
+  `?a&b`, `Cookie: flag`: the empty value of such a pair was the literal `""`, not a slice of the
+  request's text, and the range kept for it was the distance between two unrelated addresses. A
+  debug build panicked on the subtraction, a release build on the slice (`start byte index … is
+  out of bounds`), so with the filter on such a request lost its connection (0.1.0, and webfast
+  0.1.3's binary). The empty value is now the slice at the pair's end. Tests: the pairs' ranges
+  in debug and release, and `?debug` with `Cookie: flag` answered 200 through the server.
 - **libinjection's detectors: the operators `detect_sqli` and `detect_xss`** (docs/ngfw.md
   "Operators"; the cargo feature `libinjection`, on by default: the `barbacane-libinjection`
   crate `=0.1.3`, pure Rust, BSD-3-Clause). They run on each value after the rule's

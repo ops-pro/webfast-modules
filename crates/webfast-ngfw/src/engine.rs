@@ -1253,7 +1253,9 @@ pub(super) fn query_pairs(query: &str) -> impl Iterator<Item = (&str, &str)> {
     query
         .split('&')
         .filter(|p| !p.is_empty())
-        .map(|p| p.split_once('=').unwrap_or((p, "")))
+        // No `=`: the value is the empty slice at the pair's end, a range of the text as the
+        // name is (`prepare` keeps both as ranges of it).
+        .map(|p| p.split_once('=').unwrap_or((p, &p[p.len()..])))
 }
 
 /// The cookies of one or more Cookie header values joined by `;`: `name` and `value` (quotes
@@ -1264,7 +1266,8 @@ fn cookie_pairs_of(text: &str) -> impl Iterator<Item = (&str, &str)> {
         if pair.is_empty() {
             return None;
         }
-        let (name, value) = pair.split_once('=').unwrap_or((pair, ""));
+        // No `=`: an empty value at the pair's end, a range of `text` (see `query_pairs`).
+        let (name, value) = pair.split_once('=').unwrap_or((pair, &pair[pair.len()..]));
         Some((name.trim(), value.trim().trim_matches('"')))
     })
 }
@@ -2246,6 +2249,31 @@ pub(crate) mod tests {
             "wget http://x -O/tmp/a"
         );
         assert_eq!(t(Transform::Utf8ToUnicode, "a\u{e9}b\u{1F600}"), "a%u00e9b%u1f600");
+    }
+
+    /// A query parameter or a cookie without `=` (`?debug`, `Cookie: flag`) has an empty value
+    /// that is a slice of its own text, as `prepare` keeps every pair as a range of that text.
+    #[test]
+    fn a_pair_without_a_value_is_a_range_of_its_text() {
+        for query in ["debug", "a=1&debug", "debug&a=1+2", "a&&b"] {
+            for (name, value) in query_pairs(query) {
+                span(query, name);
+                span(query, value);
+            }
+        }
+        for text in ["flag", "a=1; flag", "flag ;a=1"] {
+            for (name, value) in cookie_pairs_of(text) {
+                span(text, name);
+                span(text, value);
+            }
+        }
+        let c = compiled(RULES, Mode::Block);
+        for (uri, cookie) in [("/s?debug", "flag"), ("/s?a=1+2&debug&x=x1", "a=1; flag")] {
+            let parts = request(uri, &[("user-agent", "Mozilla"), ("cookie", cookie)]);
+            let input = input(&parts);
+            let mut eval = Evaluation::new();
+            eval.run_phase(&c, Phase::Head, &input, 200);
+        }
     }
 
     #[test]
