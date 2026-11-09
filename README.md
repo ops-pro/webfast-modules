@@ -100,7 +100,14 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo clippy -p webfast-ngfw --all-targets --no-default-features -- -D warnings   # the filter without the challenge and libinjection
 scripts/check.sh                                         # the CI checks, in Docker
 python scripts/ftw-convert.py --check                    # the go-ftw YAML tests are current (PyYAML)
+WEBFAST_BIN=… scripts/ftw-run.sh                         # go-ftw against a webfast binary, in Docker
 ```
+
+`scripts/ftw-run.sh` runs the filter's go-ftw tests (`crates/webfast-ngfw/tests/ftw/`) blackbox,
+with `ci/ftw/compose.yaml` (go-ftw, albedo as the backend, the images pinned): once with every
+built-in set, as the filter ships, and once with the cve set alone. The binary is webfast's,
+built with this checkout's modules (the script's header has the command; CI's `ftw` job builds
+it from webfast's `dev-ci`).
 
 The end-to-end tests boot a server from a Caddyfile text with the core's test harness
 (`webfast_core::harness`, the core's cargo feature `test-harness`) and a composition of the crate

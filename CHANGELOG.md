@@ -8,6 +8,10 @@
   `%20` and as `+`) and in a cookie. `--check` fails when the files differ from what the sources
   give. The neighbours and the benign values, about no one rule, have the `rule_id`s 999001 and
   999002 (section 999 has no rules): go-ftw takes 0 for a missing one.
+- `scripts/ftw-run.sh` and CI's `ftw` job: the go-ftw tests against webfast's binary built with
+  the checkout's modules (`ci/ftw/compose.yaml`, go-ftw 2.6.2 and albedo 0.3.0 pinned), a pass
+  with every built-in set (three tests that wf-913-220 answers first are ignored, each with its
+  reason) and a pass with the cve set alone.
 
 ## 0.1.1 — 2026-11-08
 

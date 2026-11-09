@@ -1,0 +1,48 @@
+# The blackbox run of the filter's go-ftw tests (crates/webfast-ngfw/tests/ftw/, written by
+# scripts/ftw-convert.py): a webfast binary built with this checkout's modules, albedo behind it as
+# the backend, go-ftw sending the tests to webfast and reading the filter's log. The images are
+# pinned; the binary is the one given in WEBFAST_BIN (static, as webfast's release builds it).
+# scripts/ftw-run.sh drives it: one pass per filter file (FTW_PASS: all, cve).
+name: webfast-ftw
+
+services:
+  albedo:
+    image: ghcr.io/coreruleset/albedo:0.3.0
+    command: ["--port", "8080"]
+
+  webfast:
+    image: alpine:3.21
+    depends_on: [albedo]
+    entrypoint: ["/usr/local/bin/webfast"]
+    command: ["run", "--config", "/etc/webfast/Caddyfile"]
+    environment:
+      WEB_NGFW_CONFIG: /etc/webfast/ngfw-${FTW_PASS:-all}.yaml
+      # The log's batches as short as they go: go-ftw looks for its markers right after a test.
+      WEB_LOG_FLUSH_MS: "1"
+    volumes:
+      - ${WEBFAST_BIN:?WEBFAST_BIN names the webfast binary to test}:/usr/local/bin/webfast:ro
+      - ./Caddyfile:/etc/webfast/Caddyfile:ro
+      - ./ngfw-all.yaml:/etc/webfast/ngfw-all.yaml:ro
+      - ./ngfw-cve.yaml:/etc/webfast/ngfw-cve.yaml:ro
+      - logs:/var/log/web
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/webfast", "healthcheck", "http://127.0.0.1:8080/healthz"]
+      interval: 1s
+      timeout: 2s
+      retries: 30
+
+  goftw:
+    image: ghcr.io/coreruleset/go-ftw:2.6.2
+    profiles: [run]
+    depends_on:
+      webfast:
+        condition: service_healthy
+    volumes:
+      - ../../crates/webfast-ngfw/tests/ftw:/tests:ro
+      - ./ftw-all.yaml:/ftw-all.yaml:ro
+      - ./ftw-cve.yaml:/ftw-cve.yaml:ro
+      - logs:/var/log/web:ro
+      - ${FTW_OUT:-./out}:/out
+
+volumes:
+  logs:

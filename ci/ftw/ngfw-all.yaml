@@ -1,0 +1,11 @@
+# The first pass: every built-in set, as the filter ships.
+mode: block
+threshold: 5
+log:
+  output: /var/log/web/ngfw.log
+  passed: true
+  test_marker: X-CRS-Test
+response:
+  status: 403
+rules:
+  builtin: all

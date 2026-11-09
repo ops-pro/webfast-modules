@@ -1,0 +1,13 @@
+# The site of the go-ftw run: everything to albedo, which answers any path with 200, so a request
+# the filter lets through is a 200 and one it refuses is the filter's 403.
+{
+	auto_https off
+	admin off
+}
+
+:8080 {
+	route {
+		respond /healthz "ok" 200
+		reverse_proxy albedo:8080
+	}
+}

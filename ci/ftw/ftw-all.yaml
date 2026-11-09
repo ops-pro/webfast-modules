@@ -1,0 +1,14 @@
+# go-ftw for the first pass (every built-in set). A test listed under `ignore` is one the shipped
+# sets answer otherwise than the file expects, for the reason given; the second pass (ftw-cve.yaml)
+# runs the cve tests with nothing ignored.
+logfile: /var/log/web/ngfw.log
+logmarkerheadername: X-CRS-Test
+testoverride:
+  input:
+    dest_addr: webfast
+    port: 8080
+  ignore:
+    # wf-913-220 (scanners' probes of well-known paths) refuses these before the cve set is reached.
+    '^20170009841-1$': 'wf-913-220 refuses /vendor/phpunit/ first: the cve rule is checked in the cve pass'
+    '^999001-1$': 'wf-913-220 refuses /cgi-bin/ with every set on: a neighbour only for the cve set'
+    '^999001-3$': 'wf-913-220 refuses /vendor/phpunit/ with every set on: a neighbour only for the cve set'

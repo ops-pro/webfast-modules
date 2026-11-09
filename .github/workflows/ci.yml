@@ -1,7 +1,8 @@
 # The checks of scripts/check.sh on every push and pull request: formatting, clippy on both crates
 # of the workspace with every feature and without the defaults (the filter without the challenge),
 # the tests on x86-64 and arm64, the tests on the minimum Rust (Cargo.toml's rust-version), and
-# cargo-deny (advisories, licenses, bans, sources).
+# cargo-deny (advisories, licenses, bans, sources); and the filter's go-ftw tests against webfast's
+# binary built with this checkout's modules (scripts/ftw-run.sh).
 name: CI
 
 on:
@@ -73,3 +74,48 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check
+
+  # The filter's go-ftw tests, blackbox: webfast's binary (its dev-ci, which follows this
+  # repository's main) built static with this checkout's modules in place of the git ones, then
+  # scripts/ftw-run.sh: every built-in set, then the cve set alone.
+  ftw:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: webfast-modules
+      - uses: actions/checkout@v4
+        with:
+          repository: ops-pro/webfast
+          ref: dev-ci
+          path: webfast
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends musl-tools python3-yaml
+      - name: the go-ftw YAML tests are current
+        working-directory: webfast-modules
+        run: python3 scripts/ftw-convert.py --check
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: webfast
+      - name: webfast with this checkout's modules (static, as released)
+        working-directory: webfast
+        env:
+          RUSTFLAGS: -Ctarget-feature=+crt-static
+        run: >-
+          cargo build --release -p webfast --target x86_64-unknown-linux-musl
+          --features webfast-ngfw/libinjection
+          --config 'patch."https://github.com/ops-pro/webfast-modules".webfast-ngfw.path="../webfast-modules/crates/webfast-ngfw"'
+          --config 'patch."https://github.com/ops-pro/webfast-modules".webfast-challenge.path="../webfast-modules/crates/webfast-challenge"'
+      - name: go-ftw, every built-in set, then the cve set alone
+        working-directory: webfast-modules
+        env:
+          WEBFAST_BIN: ../webfast/target/x86_64-unknown-linux-musl/release/webfast
+          FTW_OUT: ${{ runner.temp }}/ftw
+        run: bash scripts/ftw-run.sh all cve
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ftw
+          path: ${{ runner.temp }}/ftw

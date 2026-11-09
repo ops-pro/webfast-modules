@@ -1,0 +1,12 @@
+# The second pass: the cve set alone, as the Rust test composes it, so no earlier set ends a
+# request before the cve rules see it and every one of them must fire on its case.
+mode: block
+threshold: 5
+log:
+  output: /var/log/web/ngfw.log
+  passed: true
+  test_marker: X-CRS-Test
+response:
+  status: 403
+rules:
+  builtin: [cve]

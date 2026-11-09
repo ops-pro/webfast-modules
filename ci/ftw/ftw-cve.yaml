@@ -1,0 +1,7 @@
+# go-ftw for the second pass (the cve set alone): no test is ignored.
+logfile: /var/log/web/ngfw.log
+logmarkerheadername: X-CRS-Test
+testoverride:
+  input:
+    dest_addr: webfast
+    port: 8080
