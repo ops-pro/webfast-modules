@@ -12,7 +12,7 @@
 
 use super::body::BodyData;
 use super::compile::{Compiled, CompiledRule, Magic, Matcher, Plan};
-use super::rule::{Action, Mode, Phase, Target, Transform};
+use super::rule::{Action, Measure, Mode, Phase, Target, Transform};
 use http::HeaderMap;
 use std::cell::RefCell;
 use std::io::Write as _;
@@ -652,10 +652,14 @@ impl Evaluation {
             let count = for_each_value(input, fixed, g, anomalies, &mut |_, _| true);
             for &rule in &g.whole {
                 let matched = match &c.rules[rule as usize].matcher {
-                    Matcher::CountGt(n) => (count > *n).then_some(""),
+                    Matcher::Compare(Measure::Count, cmp, n) => {
+                        cmp.holds(i64::try_from(count).unwrap_or(i64::MAX), *n).then_some("")
+                    }
                     Matcher::Exists => (count > 0).then_some(""),
                     Matcher::Missing => (count == 0).then_some(""),
-                    Matcher::Gt(n) => numeric(input, fixed, &g.target).is_some_and(|v| v > *n).then_some(""),
+                    Matcher::Compare(Measure::Number, cmp, n) => numeric(input, fixed, &g.target)
+                        .is_some_and(|v| cmp.holds(v, *n))
+                        .then_some(""),
                     Matcher::NotValidJson => input
                         .body
                         .is_some_and(|b| b.json_invalid && matches!(g.target, Target::Body | Target::BodyJson))
@@ -1175,7 +1179,10 @@ fn test_value(matcher: &Matcher, text: &str) -> Option<Range<usize>> {
             .iter()
             .find(|s| text.ends_with(s.as_str()))
             .map(|s| text.len() - s.len()..text.len()),
-        Matcher::LengthGt(n) => (text.len() > *n).then(whole).flatten(),
+        Matcher::Compare(Measure::Length, cmp, n) => cmp
+            .holds(i64::try_from(text.len()).unwrap_or(i64::MAX), *n)
+            .then(whole)
+            .flatten(),
         Matcher::InSet(set) => set.contains(text).then(whole).flatten(),
         Matcher::IpIn(set) => text
             .trim()
@@ -2405,6 +2412,59 @@ rules:
 
     fn ids(c: &Compiled, eval: &Evaluation) -> Vec<String> {
         eval.hits.iter().map(|h| c.rules[h.rule as usize].id.clone()).collect()
+    }
+
+    /// `gt`, `ge`, `lt`, `le`, `eq`, `ne` on a numeric target, and the same comparisons as
+    /// `count_*` (the number of the target's values) and `length_*` (each value's length).
+    #[test]
+    fn comparisons_of_numbers_counts_and_lengths() {
+        let c = compiled(
+            r"
+rules:
+  - {id: n-ge, phase: head, targets: [args_count], operator: {ge: 2}}
+  - {id: n-lt, phase: head, targets: [args_count], operator: {lt: 1}}
+  - {id: n-le, phase: head, targets: [args_count], operator: {le: 1}}
+  - {id: n-eq, phase: head, targets: [args_count], operator: {eq: 2}}
+  - {id: n-ne, phase: head, targets: [args_count], operator: {ne: 2}}
+  - {id: c-eq, phase: head, targets: [headers.x-a], operator: {count_eq: 0}}
+  - {id: c-ge, phase: head, targets: [args], operator: {count_ge: 2}}
+  - {id: c-lt, phase: head, targets: [cookies], operator: {count_lt: 2}}
+  - {id: c-ne, phase: head, targets: [cookies], operator: {count_ne: 0}}
+  - {id: l-ge, phase: head, targets: [args], operator: {length_ge: 5}}
+  - {id: l-lt, phase: head, targets: [args], operator: {length_lt: 2}}
+  - {id: l-le, phase: head, targets: [args], operator: {length_le: 1}}
+  - {id: l-eq, phase: head, targets: [args], operator: {length_eq: 2}}
+  - {id: l-ne, phase: head, targets: [ua], operator: {length_ne: 7}}
+",
+            Mode::Block,
+        );
+        let hits = |uri: &str, headers: &[(&str, &str)]| {
+            let parts = request(uri, headers);
+            let input = input(&parts);
+            let mut eval = Evaluation::new();
+            eval.run_phase(&c, Phase::Head, &input, 200);
+            let mut ids = ids(&c, &eval);
+            ids.sort_unstable();
+            ids
+        };
+        // Two parameters, "1" and "22"; no x-a, no cookie; a User-Agent of seven bytes.
+        assert_eq!(
+            hits("/?a=1&bb=22", &[("user-agent", "Mozilla")]),
+            ["c-eq", "c-ge", "c-lt", "l-eq", "l-le", "l-lt", "n-eq", "n-ge"]
+        );
+        // One parameter of five bytes, x-a, three cookies, another User-Agent.
+        assert_eq!(
+            hits(
+                "/?abc=xyz12",
+                &[("user-agent", "curl/8"), ("x-a", "1"), ("cookie", "k=v; k2=v2; k3=v3")]
+            ),
+            ["c-ne", "l-ge", "l-ne", "n-le", "n-ne"]
+        );
+        // None: no parameter at all.
+        assert_eq!(
+            hits("/", &[("user-agent", "Mozilla")]),
+            ["c-eq", "c-lt", "n-le", "n-lt", "n-ne"]
+        );
     }
 
     #[test]

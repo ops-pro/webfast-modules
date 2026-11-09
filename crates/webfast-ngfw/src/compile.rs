@@ -14,7 +14,9 @@
 
 use super::config::{ExclusionConfig, Sourced};
 use super::iplist::IpSet;
-use super::rule::{Action, Confidence, IdPattern, Mode, Operator, Phase, Refs, Rule, Severity, Target, Transform};
+use super::rule::{
+    Action, Cmp, Confidence, IdPattern, Measure, Mode, Operator, Phase, Refs, Rule, Severity, Target, Transform,
+};
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder, AhoCorasickKind, MatchKind};
 use anyhow::{Context, Result, anyhow, bail};
 use http::{HeaderName, HeaderValue};
@@ -60,9 +62,9 @@ pub enum Matcher {
     EqualsAny(FxHashSet<String>),
     StartsWithAny(Vec<String>),
     EndsWithAny(Vec<String>),
-    LengthGt(usize),
-    CountGt(usize),
-    Gt(i64),
+    /// `length_*`, `count_*`, `gt` and the others: the measure of each value or of the target
+    /// against the number.
+    Compare(Measure, Cmp, i64),
     InSet(FxHashSet<String>),
     IpIn(IpSet),
     CountryIn(Vec<[u8; 2]>),
@@ -90,8 +92,7 @@ impl Matcher {
     fn is_whole(&self) -> bool {
         matches!(
             self,
-            Matcher::CountGt(_)
-                | Matcher::Gt(_)
+            Matcher::Compare(Measure::Count | Measure::Number, _, _)
                 | Matcher::Exists
                 | Matcher::Missing
                 | Matcher::NotValidJson
@@ -354,6 +355,9 @@ fn lowered(items: &[String], lowercase: bool) -> Vec<String> {
 /// The matcher of a rule, and the literals that go into its group's automaton.
 fn matcher(sourced: &Sourced, lowercase: bool) -> Result<(Matcher, Vec<String>)> {
     let rule = &sourced.rule;
+    if let Some((measure, cmp, n)) = rule.operator.comparison() {
+        return Ok((Matcher::Compare(measure, cmp, n), Vec::new()));
+    }
     Ok(match &rule.operator {
         Operator::ContainsAny(literals) => {
             if literals.is_empty() {
@@ -374,9 +378,6 @@ fn matcher(sourced: &Sourced, lowercase: bool) -> Result<(Matcher, Vec<String>)>
                 .with_context(|| format!("regex {pattern:?}"))?;
             (Matcher::Regex(regex), lowered(&rule.prefilter, lowercase))
         }
-        Operator::LengthGt(n) => (Matcher::LengthGt(*n), Vec::new()),
-        Operator::CountGt(n) => (Matcher::CountGt(*n), Vec::new()),
-        Operator::Gt(n) => (Matcher::Gt(*n), Vec::new()),
         Operator::InSet(file) => {
             let path = sourced.base.join(file);
             let text = std::fs::read_to_string(&path).with_context(|| format!("in_set {}", path.display()))?;
@@ -420,6 +421,24 @@ fn matcher(sourced: &Sourced, lowercase: bool) -> Result<(Matcher, Vec<String>)>
             super::config::needs_libinjection("detect_xss")?;
             (Matcher::DetectXss, lowered(&rule.prefilter, lowercase))
         }
+        Operator::LengthGt(_)
+        | Operator::LengthGe(_)
+        | Operator::LengthLt(_)
+        | Operator::LengthLe(_)
+        | Operator::LengthEq(_)
+        | Operator::LengthNe(_)
+        | Operator::CountGt(_)
+        | Operator::CountGe(_)
+        | Operator::CountLt(_)
+        | Operator::CountLe(_)
+        | Operator::CountEq(_)
+        | Operator::CountNe(_)
+        | Operator::Gt(_)
+        | Operator::Ge(_)
+        | Operator::Lt(_)
+        | Operator::Le(_)
+        | Operator::Eq(_)
+        | Operator::Ne(_) => unreachable!("a comparison is compiled above"),
     })
 }
 
@@ -488,8 +507,13 @@ pub fn compile(rules: &[Sourced], mode: Mode, exclusions: &[ExclusionConfig]) ->
         let targets = targets_of(rule).with_context(|| format!("rule {of}"))?;
         let lowercase = rule.transform.contains(&Transform::Lowercase);
         let (matcher, literals) = matcher(sourced, lowercase).with_context(|| format!("rule {of}"))?;
-        if matches!(matcher, Matcher::Gt(_)) && !targets.iter().all(Target::is_numeric) {
-            bail!("rule {of}: gt takes a numeric target (args_count, upload.count, response.status, asn)");
+        if let Matcher::Compare(Measure::Number, cmp, _) = matcher
+            && !targets.iter().all(Target::is_numeric)
+        {
+            bail!(
+                "rule {of}: {} takes a numeric target (args_count, upload.count, response.status, asn)",
+                cmp.name()
+            );
         }
         if matches!(matcher, Matcher::MagicIs(_) | Matcher::MagicNot(_))
             && targets.iter().any(|t| *t != Target::UploadHead)
@@ -820,6 +844,10 @@ rules:
             (
                 "rules:\n  - {id: a, phase: head, targets: [ua], operator: {gt: 1}}\n",
                 "numeric",
+            ),
+            (
+                "rules:\n  - {id: a, phase: head, targets: [args], operator: {le: 1}}\n",
+                "le takes a numeric target",
             ),
             (
                 "rules:\n  - {id: a, phase: head, targets: [ua], operator: exists, when: [zz]}\n",

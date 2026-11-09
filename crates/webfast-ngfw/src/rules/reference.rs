@@ -104,9 +104,27 @@ fn operator(rule: &Rule) -> String {
         Operator::StartsWithAny(l) => format!("`starts_with_any`: {}", codes(l)),
         Operator::EndsWithAny(l) => format!("`ends_with_any`: {}", codes(l)),
         Operator::Regex(pattern) => format!("`regex`:\n\n  ```text\n  {pattern}\n  ```\n"),
-        Operator::LengthGt(n) => format!("`length_gt: {n}`"),
-        Operator::CountGt(n) => format!("`count_gt: {n}`"),
-        Operator::Gt(n) => format!("`gt: {n}`"),
+        op @ (Operator::LengthGt(_)
+        | Operator::LengthGe(_)
+        | Operator::LengthLt(_)
+        | Operator::LengthLe(_)
+        | Operator::LengthEq(_)
+        | Operator::LengthNe(_)
+        | Operator::CountGt(_)
+        | Operator::CountGe(_)
+        | Operator::CountLt(_)
+        | Operator::CountLe(_)
+        | Operator::CountEq(_)
+        | Operator::CountNe(_)
+        | Operator::Gt(_)
+        | Operator::Ge(_)
+        | Operator::Lt(_)
+        | Operator::Le(_)
+        | Operator::Eq(_)
+        | Operator::Ne(_)) => match op.comparison() {
+            Some((measure, cmp, n)) => format!("`{}{}: {n}`", measure.prefix(), cmp.name()),
+            None => String::new(),
+        },
         Operator::InSet(file) => format!("`in_set`: {}", code(file)),
         Operator::IpIn(l) => format!("`ip_in`: {}", codes(l)),
         Operator::CountryIn(l) => format!("`country_in`: {}", codes(l)),

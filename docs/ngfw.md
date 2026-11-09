@@ -250,7 +250,7 @@ file's `doc` are for the reference (below) and for whoever reads the file, not f
 | `args`              | every parameter value of the query and, in the `body` phase, of a form body; a query's `+` is read as a space (form encoding, as a form body's), `%2B` stays a `+` |
 | `args_names`        | every parameter name (a query's `+` a space, as for `args`)                         |
 | `args.<name>`       | the values of one parameter                                                         |
-| `args_count`        | the number of parameters (as text, for `gt`)                                        |
+| `args_count`        | the number of parameters (for `gt`, `ge`, `lt`, `le`, `eq`, `ne`)                   |
 | `headers`           | every header value (the request's)                                                  |
 | `headers_names`     | every header name                                                                   |
 | `headers.<name>`    | the values of one header                                                            |
@@ -294,8 +294,14 @@ Exactly one per rule:
 - `regex: pattern` — the `regex` crate's syntax, compiled once; `prefilter: [literals]` on the
   rule gates it: the regex runs only when a literal occurs (strongly recommended; `validate`
   warns about a regex without one).
-- `length_gt: n`, `count_gt: n` (number of values of the target), `gt: n` for numeric targets
-  (`args_count`, `upload.count`, `response.status`).
+- Comparisons with a number, each as `gt`, `ge`, `lt`, `le`, `eq` or `ne` (greater, greater or
+  equal, less, less or equal, equal, not equal):
+  - `gt: n` … `ne: n` — a numeric target (`args_count`, `upload.count`, `response.status`,
+    `asn`); a rule with another target does not load;
+  - `count_gt: n` … `count_ne: n` — the number of the target's values in the phase
+    (`count_eq: 0` on `headers.x-a`: the header is absent);
+  - `length_gt: n` … `length_ne: n` — the length in bytes of each value, after the rule's
+    transformations; the rule takes the first value that holds.
 - `in_set: file` — a file of one literal per line, relative to the rules file (a word list).
 - `ip_in: [cidrs]`, `country_in: [codes]`, `asn_in: [numbers]`.
 - `magic_not: [types]` — (upload) the declared type is one of these and the file's first bytes are

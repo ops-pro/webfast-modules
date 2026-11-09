@@ -12,6 +12,10 @@
   the checkout's modules (`ci/ftw/compose.yaml`, go-ftw 2.6.2 and albedo 0.3.0 pinned), a pass
   with every built-in set (three tests that wf-913-220 answers first are ignored, each with its
   reason) and a pass with the cve set alone.
+- The filter's comparison operators: besides `gt`, `ge`, `lt`, `le`, `eq` and `ne` on a numeric
+  target; `count_ge` … `count_ne` besides `count_gt` (the number of the target's values) and
+  `length_ge` … `length_ne` besides `length_gt` (each value's length). One matcher compares for
+  all of them; the rules that use `gt`, `count_gt` and `length_gt` are unchanged.
 
 ## 0.1.1 — 2026-11-08
 

@@ -521,7 +521,7 @@ impl Target {
         )
     }
 
-    /// A target that is a number (for `gt`).
+    /// A target that is a number (for `gt`, `ge`, `lt`, `le`, `eq`, `ne`).
     pub fn is_numeric(&self) -> bool {
         matches!(
             self,
@@ -539,9 +539,27 @@ pub enum Operator {
     StartsWithAny(Vec<String>),
     EndsWithAny(Vec<String>),
     Regex(String),
+    /// The length in bytes of each value against a number.
     LengthGt(usize),
+    LengthGe(usize),
+    LengthLt(usize),
+    LengthLe(usize),
+    LengthEq(usize),
+    LengthNe(usize),
+    /// The number of the target's values against a number.
     CountGt(usize),
+    CountGe(usize),
+    CountLt(usize),
+    CountLe(usize),
+    CountEq(usize),
+    CountNe(usize),
+    /// A numeric target (`Target::is_numeric`) against a number.
     Gt(i64),
+    Ge(i64),
+    Lt(i64),
+    Le(i64),
+    Eq(i64),
+    Ne(i64),
     /// A file of one literal per line, relative to the rules file.
     InSet(String),
     IpIn(Vec<String>),
@@ -565,6 +583,88 @@ impl Operator {
     /// One of libinjection's detectors.
     pub fn is_libinjection(&self) -> bool {
         matches!(self, Operator::DetectSqli | Operator::DetectXss)
+    }
+
+    /// A comparison of a number with the operator's: what is compared, how, and the number.
+    pub fn comparison(&self) -> Option<(Measure, Cmp, i64)> {
+        use {Cmp::*, Measure::*};
+        let n = |v: &usize| i64::try_from(*v).unwrap_or(i64::MAX);
+        Some(match self {
+            Operator::LengthGt(v) => (Length, Gt, n(v)),
+            Operator::LengthGe(v) => (Length, Ge, n(v)),
+            Operator::LengthLt(v) => (Length, Lt, n(v)),
+            Operator::LengthLe(v) => (Length, Le, n(v)),
+            Operator::LengthEq(v) => (Length, Eq, n(v)),
+            Operator::LengthNe(v) => (Length, Ne, n(v)),
+            Operator::CountGt(v) => (Count, Gt, n(v)),
+            Operator::CountGe(v) => (Count, Ge, n(v)),
+            Operator::CountLt(v) => (Count, Lt, n(v)),
+            Operator::CountLe(v) => (Count, Le, n(v)),
+            Operator::CountEq(v) => (Count, Eq, n(v)),
+            Operator::CountNe(v) => (Count, Ne, n(v)),
+            Operator::Gt(v) => (Number, Gt, *v),
+            Operator::Ge(v) => (Number, Ge, *v),
+            Operator::Lt(v) => (Number, Lt, *v),
+            Operator::Le(v) => (Number, Le, *v),
+            Operator::Eq(v) => (Number, Eq, *v),
+            Operator::Ne(v) => (Number, Ne, *v),
+            _ => return None,
+        })
+    }
+}
+
+/// What a comparison operator compares: each value's length (`length_*`), the number of the
+/// target's values (`count_*`), or a numeric target's number (`gt` and the others).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Measure {
+    Length,
+    Count,
+    Number,
+}
+
+impl Measure {
+    /// The operator's name before the comparison: `length_`, `count_`, or none.
+    pub fn prefix(self) -> &'static str {
+        match self {
+            Measure::Length => "length_",
+            Measure::Count => "count_",
+            Measure::Number => "",
+        }
+    }
+}
+
+/// A comparison, the measured number on the left: `gt` holds for 5 against 3.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cmp {
+    Gt,
+    Ge,
+    Lt,
+    Le,
+    Eq,
+    Ne,
+}
+
+impl Cmp {
+    pub fn holds(self, measured: i64, against: i64) -> bool {
+        match self {
+            Cmp::Gt => measured > against,
+            Cmp::Ge => measured >= against,
+            Cmp::Lt => measured < against,
+            Cmp::Le => measured <= against,
+            Cmp::Eq => measured == against,
+            Cmp::Ne => measured != against,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Cmp::Gt => "gt",
+            Cmp::Ge => "ge",
+            Cmp::Lt => "lt",
+            Cmp::Le => "le",
+            Cmp::Eq => "eq",
+            Cmp::Ne => "ne",
+        }
     }
 }
 
