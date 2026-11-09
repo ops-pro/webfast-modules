@@ -99,6 +99,7 @@ cargo test --workspace                                   # unit tests and the en
 cargo clippy --workspace --all-targets -- -D warnings
 cargo clippy -p webfast-ngfw --all-targets --no-default-features -- -D warnings   # the filter without the challenge and libinjection
 scripts/check.sh                                         # the CI checks, in Docker
+python scripts/ftw-convert.py --check                    # the go-ftw YAML tests are current (PyYAML)
 ```
 
 The end-to-end tests boot a server from a Caddyfile text with the core's test harness

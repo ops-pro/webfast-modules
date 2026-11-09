@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- The filter's rule tests as go-ftw YAML (`crates/webfast-ngfw/tests/ftw/`), generated from the
+  Rust tests by `scripts/ftw-convert.py`: each `cve` rule's request and its neighbours, and the
+  SQL injection, XSS and benign values of the detectors' corpus, each in a query (a space as
+  `%20` and as `+`) and in a cookie. `--check` fails when the files differ from what the sources
+  give.
+
 ## 0.1.1 — 2026-11-08
 
 The filter's second release: a fix for requests with a parameter or a cookie without `=`, which
