@@ -16,6 +16,14 @@
   target; `count_ge` … `count_ne` besides `count_gt` (the number of the target's values) and
   `length_ge` … `length_ne` besides `length_gt` (each value's length). One matcher compares for
   all of them; the rules that use `gt`, `count_gt` and `length_gt` are unchanged.
+- A `BYPASS` corpus beside SQLI and XSS: 61 known WAF evasions (comments and encodings inside
+  keywords, spaces swapped or left out, entities and escapes, tags and attributes closed or split)
+  that the built-in sets must keep refusing, in the Rust test and as go-ftw's `corpus/bypass.yaml`
+  (`rule_id` 999003). A regression set: it holds what the sets catch. The converter now gives each
+  corpus file its `rule_id` explicitly.
+- docs/ngfw.md: the feeds' example is Spamhaus DROP and blocklist.de, with how a feed is fetched,
+  parsed and kept; EDROP is merged into DROP, and a list with the bogons in it (FireHOL level 1
+  has the loopback and the private ranges) denies a health check and internal clients.
 
 ## 0.1.1 — 2026-11-08
 

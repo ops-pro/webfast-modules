@@ -11,9 +11,10 @@ Reads:
   - crates/webfast-ngfw/src/engine.rs: the `takes` and `neighbours` tables of
     `each_cve_rule_takes_its_signature_and_not_its_neighbour`, and the `BROWSER`
     headers of the corpus test;
-  - crates/webfast-ngfw/src/detect/corpus.rs: the `SQLI`, `XSS` and `BENIGN`
-    arrays, each value sent three ways (a query parameter `v` with spaces as
-    `%20` and as `+`, and a cookie `c`), as the engine's test sends them;
+  - crates/webfast-ngfw/src/detect/corpus.rs: the `SQLI`, `XSS`, `BYPASS` and
+    `BENIGN` arrays, each value sent three ways (a query parameter `v` with
+    spaces as `%20` and as `+`, and a cookie `c`), as the engine's test sends
+    them;
   - docs/ngfw-rules.md: every rule's `Number` line, as a cross-check of the
     numbers the script computes the way `rule::number_of` does.
 
@@ -22,6 +23,7 @@ Writes, under crates/webfast-ngfw/tests/ftw/:
   - cve/neighbours.yaml    the neighbours: no cve rule (`no_expect_ids`, 200)
   - sqli/942170.yaml       the SQLI corpus x 3 spellings (403, the whole filter)
   - xss/941150.yaml        the XSS corpus x 3 spellings (403, the whole filter)
+  - corpus/bypass.yaml     the BYPASS corpus x 3 spellings (403, the whole filter)
   - corpus/benign.yaml     the BENIGN corpus x 3 spellings (200, no hit)
 
 Every request is a GET for HTTP/1.1 with `host: www.example.com`, as the
@@ -70,10 +72,11 @@ OUT_ROOT = NGFW / "tests" / "ftw"
 SQLI_RULE = "wf-942-170"
 XSS_RULE = "wf-941-150"
 
-# The `rule_id` of the two files that are about no one rule: go-ftw takes 0 for a missing field.
+# The `rule_id` of the files that are about no one rule: go-ftw takes 0 for a missing field.
 # Section 999 has no rules (checked against docs/ngfw-rules.md), so these stand for none.
 NEIGHBOURS_NUMBER = 999001
 BENIGN_NUMBER = 999002
+BYPASS_NUMBER = 999003
 
 DEST_ADDR = "127.0.0.1"
 PORT = 80
@@ -394,6 +397,7 @@ def build():
     browser = extract(engine, "const BROWSER: [(&str, &str); 2] = [", "src/engine.rs")
     sqli = extract(corpus, "pub(crate) const SQLI: &[&str] = &[", "src/detect/corpus.rs")
     xss = extract(corpus, "pub(crate) const XSS: &[&str] = &[", "src/detect/corpus.rs")
+    bypass = extract(corpus, "pub(crate) const BYPASS: &[&str] = &[", "src/detect/corpus.rs")
     benign = extract(corpus, "pub(crate) const BENIGN: &[&str] = &[", "src/detect/corpus.rs")
 
     for name, table in (("takes", takes), ("neighbours", neighbours), ("BROWSER", browser)):
@@ -407,7 +411,7 @@ def build():
             raise ConvertError("src/engine.rs: a `neighbours` entry is not (uri, headers)")
     if len(browser) != 2:
         raise ConvertError("src/engine.rs: BROWSER does not have two headers")
-    for name, values in (("SQLI", sqli), ("XSS", xss), ("BENIGN", benign)):
+    for name, values in (("SQLI", sqli), ("XSS", xss), ("BYPASS", bypass), ("BENIGN", benign)):
         if not values or not all(isinstance(v, str) for v in values):
             raise ConvertError(f"src/detect/corpus.rs: the {name} array is empty or not strings")
 
@@ -482,10 +486,13 @@ def build():
             for index, value in enumerate(values, start=1)
         ]
 
+    sqli_number = checked_number(numbers, SQLI_RULE)
+    xss_number = checked_number(numbers, XSS_RULE)
+    # (path, the file's rule_id, values, status, a test's desc, the file's description)
     corpus_files = (
         (
-            rel("crates", "webfast-ngfw", "tests", "ftw", "sqli", f"{checked_number(numbers, SQLI_RULE)}.yaml"),
-            SQLI_RULE,
+            rel("crates", "webfast-ngfw", "tests", "ftw", "sqli", f"{sqli_number}.yaml"),
+            sqli_number,
             sqli,
             403,
             "SQL injection payload",
@@ -493,8 +500,8 @@ def build():
             "together refuse every payload, in a query (both spellings of a space) and in a cookie.",
         ),
         (
-            rel("crates", "webfast-ngfw", "tests", "ftw", "xss", f"{checked_number(numbers, XSS_RULE)}.yaml"),
-            XSS_RULE,
+            rel("crates", "webfast-ngfw", "tests", "ftw", "xss", f"{xss_number}.yaml"),
+            xss_number,
             xss,
             403,
             "Cross-site scripting payload",
@@ -502,8 +509,19 @@ def build():
             "every payload, in a query (both spellings of a space) and in a cookie.",
         ),
         (
+            rel("crates", "webfast-ngfw", "tests", "ftw", "corpus", "bypass.yaml"),
+            BYPASS_NUMBER,
+            bypass,
+            403,
+            "WAF-evasion payload",
+            "The payloads of the public WAF-evasion lists, in the form the request carries them "
+            "(comments inside keywords, partly encoded keywords, entities and escapes, parser "
+            "shapes): the built-in sets together refuse every one, in a query (both spellings of "
+            "a space) and in a cookie.",
+        ),
+        (
             rel("crates", "webfast-ngfw", "tests", "ftw", "corpus", "benign.yaml"),
-            None,
+            BENIGN_NUMBER,
             benign,
             200,
             "Benign value",
@@ -511,8 +529,7 @@ def build():
             "through, in a query (both spellings of a space) and in a cookie.",
         ),
     )
-    for path, rule_id, values, status, desc, meta_description in corpus_files:
-        number = checked_number(numbers, rule_id) if rule_id else BENIGN_NUMBER
+    for path, number, values, status, desc, meta_description in corpus_files:
         name = Path(path).stem
         files[path] = file_doc(name, number, meta_description, corpus_tests(values, desc))
 

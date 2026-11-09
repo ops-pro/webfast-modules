@@ -109,9 +109,11 @@ access:                           # decided first, on the client's address alone
     allow: [10.0.0.0/8, 203.0.113.7]   # passes everything below, and the rules
     deny: [198.51.100.0/24]
     deny_files: [blocklist.txt]        # one address or CIDR per line, `#` and `;` comments
-    feeds:
-      - url: https://www.spamhaus.org/drop/drop.txt
+    feeds:                         # one address or CIDR per line, `#` and `;` comments: the format
+      - url: https://www.spamhaus.org/drop/drop.txt       # Spamhaus DROP: hijacked netblocks
         every: 12h
+      - url: https://lists.blocklist.de/lists/all.txt
+        every: 1h                  # blocklist.de: the hosts that attacked web services of late
   ban:
     on_blocks: 10                 # this many refusals within `window`: banned
     window: 10m
@@ -127,6 +129,23 @@ match:                            # where the module runs at all; none: everywhe
 Every key is optional but `threshold`, which defaults to 5, and `rules.builtin`, which defaults to
 `all`. Sizes take `KiB`/`MiB`/`B`; durations `s`, `m`, `h`, `d`. Unknown keys are errors (serde
 `deny_unknown_fields`).
+
+**The feeds.** A feed is fetched at start and whenever its `every` is out (an HTTP GET, at most
+16 MiB, 30 s), parsed as a deny file — one address or CIDR per line, `#` and `;` comments — and
+denied like the static list; it is asked for a change only (`If-None-Match`, `If-Modified-Since`)
+once it has been fetched, and one that fails keeps its last entries; a line that is not an
+address or a CIDR fails the whole fetch. The example's two are in that format: Spamhaus DROP, the
+netblocks of hijacked and spam-serving networks (EDROP is merged into it, its own file is empty);
+and blocklist.de, the hosts reported attacking web services of late — the wider of the two (some
+24 000 addresses) and the more likely to name a shared address, so a site that takes it watches
+its false refusals first. A list with the bogons in it does not belong here as it is: FireHOL's
+`firehol_level1.netset` has `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` and
+`100.64.0.0/10` among them, and denies the loopback (a health check), a container network and
+every client behind a proxy whose address is not restored. One source does not fit as it
+publishes itself: DShield's `block.txt` is two address columns, not entries per line (FireHOL's
+`dshield.netset` is the same list in this format). An entry is denied outright, so the site's own
+upstreams, CDN and monitoring addresses go in `allow` first: an address there is not denied by
+any list, file or feed.
 
 **The browser challenge** (docs/challenge.md; this crate's cargo feature `challenge`, on by default: the `webfast-challenge` crate). Anything that asks for it
 — `mode: challenge`, a rule's `action: challenge` or `mode: challenge`, `access.countries.challenge`,

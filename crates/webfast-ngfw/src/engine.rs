@@ -2813,7 +2813,7 @@ rules:
     #[cfg(feature = "libinjection")]
     mod libinjection {
         use super::super::super::config::{RulesConfig, compose};
-        use super::super::super::detect::corpus::{BENIGN, SQLI, XSS};
+        use super::super::super::detect::corpus::{BENIGN, BYPASS, SQLI, XSS};
         use super::super::super::detect::{self, tests::query_encoded};
         use super::*;
 
@@ -2990,12 +2990,13 @@ rules:
         }
 
         /// Every payload of the corpus is refused by the built-in sets together, in a query (both
-        /// spellings of a space) and in a cookie; no benign value is hit by any rule.
+        /// spellings of a space) and in a cookie; no benign value is hit by any rule. The corpus
+        /// here is SQLI and XSS and BYPASS (known evasions the shipped sets must keep refusing).
         #[test]
         fn the_whole_filter_refuses_the_corpus_and_hits_no_benign_value() {
             let c = builtin();
             let mut passed = Vec::new();
-            for payload in SQLI.iter().chain(XSS) {
+            for payload in SQLI.iter().chain(XSS).chain(BYPASS) {
                 for (place, score, hits) in evaluations(&c, payload) {
                     if score < 5 {
                         passed.push(format!("{place}: {payload:?} scored {score} {hits:?}"));
