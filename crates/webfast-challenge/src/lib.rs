@@ -364,9 +364,12 @@ impl Challenge {
             return status(StatusCode::FORBIDDEN);
         };
         let good = match data.level {
+            // The length first: an answer that is no SHA-256 in hex is refused without the hash.
             Level::Cookie | Level::Js => {
-                let expected = aws_lc_rs::digest::digest(&aws_lc_rs::digest::SHA256, nonce.as_bytes());
-                answer.len() == 64 && hex_equals(expected.as_ref(), answer.as_bytes())
+                answer.len() == 64 && {
+                    let expected = aws_lc_rs::digest::digest(&aws_lc_rs::digest::SHA256, nonce.as_bytes());
+                    hex_equals(expected.as_ref(), answer.as_bytes())
+                }
             }
             Level::Pow => pow::check(nonce.as_bytes(), answer.as_bytes(), data.difficulty),
             Level::Captcha => {

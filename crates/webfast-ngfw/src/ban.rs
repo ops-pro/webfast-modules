@@ -151,19 +151,22 @@ impl Bans {
         self.shards[index].0.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Whether `ip` is banned at `now`: one lock, one lookup. An address marked for the challenge
-    /// is not banned.
-    pub fn banned(&self, ip: IpAddr, now: Instant) -> bool {
-        self.shard(ip)
-            .get(&ip)
-            .is_some_and(|entry| !entry.challenged && entry.marked(now))
+    /// What `ip` is marked with at `now`: banned (`Then::Ban`), marked for the browser challenge
+    /// (`Then::Challenge`, `then: challenge` reached), or nothing; one lock, one lookup.
+    pub fn mark(&self, ip: IpAddr, now: Instant) -> Option<Then> {
+        let shard = self.shard(ip);
+        let entry = shard.get(&ip).filter(|entry| entry.marked(now))?;
+        Some(if entry.challenged { Then::Challenge } else { Then::Ban })
     }
 
-    /// Whether `ip` is marked for the browser challenge at `now` (`then: challenge` reached).
+    /// Whether `ip` is banned at `now`. An address marked for the challenge is not banned.
+    pub fn banned(&self, ip: IpAddr, now: Instant) -> bool {
+        self.mark(ip, now) == Some(Then::Ban)
+    }
+
+    /// Whether `ip` is marked for the browser challenge at `now`.
     pub fn challenged(&self, ip: IpAddr, now: Instant) -> bool {
-        self.shard(ip)
-            .get(&ip)
-            .is_some_and(|entry| entry.challenged && entry.marked(now))
+        self.mark(ip, now) == Some(Then::Challenge)
     }
 
     /// A refusal happened: counted in the window; `Some(then)` when the count reached `on_blocks`

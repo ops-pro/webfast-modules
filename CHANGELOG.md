@@ -38,6 +38,11 @@
 - docs/ngfw.md: the feeds' example is Spamhaus DROP and blocklist.de, with how a feed is fetched,
   parsed and kept; EDROP is merged into DROP, and a list with the bogons in it (FireHOL level 1
   has the loopback and the private ranges) denies a health check and internal clients.
+- The filter's head check: the query parameters the JWT check hides from the logs are a slice
+  made once and shared with each request (they were copied per request, a string each, on a site
+  with JWT `from_params`); the ban list is looked up once for the ban and the challenge mark.
+- The browser challenge: a `js` or `cookie` answer that is not 64 characters is refused before the
+  nonce's hash is computed.
 
 ## 0.1.1 — 2026-11-08
 

@@ -146,8 +146,9 @@ pub struct Ngfw {
     /// The file, for a reload; `None` for one loaded from text.
     path: Option<PathBuf>,
     state: ArcSwap<State>,
-    /// Query parameters the JWT check hides from the logs, told after both are loaded.
-    hidden: ArcSwap<Vec<String>>,
+    /// Query parameters the JWT check hides from the logs, told after both are loaded: a slice
+    /// shared as it is with every request (`HiddenParams`), made once.
+    hidden: ArcSwap<Arc<[String]>>,
 }
 
 /// The running instance, for a reload (`Module::reload` has no configuration to find it in): set
@@ -160,7 +161,7 @@ pub struct Pending {
     state: Arc<State>,
     evaluation: Evaluation,
     geo: (Option<[u8; 2]>, Option<u32>),
-    hidden: Arc<Vec<String>>,
+    hidden: Arc<[String]>,
     kind: body::Kind,
 }
 
@@ -506,7 +507,7 @@ impl Ngfw {
         Ok(Ngfw {
             path: Some(path.to_path_buf()),
             state: ArcSwap::from_pointee(state),
-            hidden: ArcSwap::from_pointee(Vec::new()),
+            hidden: ArcSwap::from_pointee(Arc::from(Vec::new())),
         })
     }
 
@@ -516,7 +517,7 @@ impl Ngfw {
         Ok(Ngfw {
             path: None,
             state: ArcSwap::from_pointee(state),
-            hidden: ArcSwap::from_pointee(Vec::new()),
+            hidden: ArcSwap::from_pointee(Arc::from(Vec::new())),
         })
     }
 
@@ -535,7 +536,7 @@ impl Ngfw {
 
     /// Query parameters whose values the logs do not show (the JWT check's `from_params`).
     pub fn hide_params(&self, names: Vec<String>) {
-        self.hidden.store(Arc::new(names));
+        self.hidden.store(Arc::new(Arc::from(names)));
     }
 
     /// Rules, sets (for the startup log).
@@ -834,11 +835,12 @@ impl Ngfw {
         if !compiled.header_names.is_empty() {
             webfast_core::proxy::remove_lookalikes(&mut parts.headers, &compiled.header_names);
         }
-        let hidden = self.hidden.load_full();
+        // Reference counts only: the slice is made when the names are told.
+        let hidden: Arc<[String]> = Arc::clone(&self.hidden.load());
         if !hidden.is_empty() && parts.extensions.get::<webfast_core::eventlog::HiddenParams>().is_none() {
             parts
                 .extensions
-                .insert(webfast_core::eventlog::HiddenParams(Arc::from(hidden.as_slice())));
+                .insert(webfast_core::eventlog::HiddenParams(Arc::clone(&hidden)));
         }
         let ip = client.ip;
         let geo = (state.country(ip), state.asn(ip));
@@ -855,11 +857,11 @@ impl Ngfw {
             {
                 return Pre::Skip;
             }
-            let now = Instant::now();
-            if state.bans.banned(ip, now) {
+            let mark = state.bans.mark(ip, Instant::now());
+            if mark == Some(ban::Then::Ban) {
                 return Pre::Refuse("ban");
             }
-            let challenged = state.bans.challenged(ip, now);
+            let challenged = mark == Some(ban::Then::Challenge);
             if state.lists.denied(ip) {
                 return Pre::Refuse("ip");
             }
