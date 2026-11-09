@@ -215,6 +215,8 @@ pub struct Input<'a> {
     pub country: Option<[u8; 2]>,
     pub asn: Option<u32>,
     pub sni: Option<&'a str>,
+    /// The client's TLS fingerprint (the connection's), when known.
+    pub ja4: Option<webfast_core::ja4::Ja4>,
     pub body: Option<&'a BodyData>,
     pub response: Option<ResponseData<'a>>,
     /// Query parameters whose values the log does not show (webfast_core::eventlog `HiddenParams`).
@@ -1556,6 +1558,12 @@ fn for_each_value(
         Target::TlsSni => {
             each(None, input.sni.unwrap_or("-"));
         }
+        // No value without a fingerprint: absence matches nothing (but `missing`).
+        Target::TlsJa4 => {
+            if let Some(ja4) = &input.ja4 {
+                each(None, ja4.as_str());
+            }
+        }
         Target::ResponseStatus => {
             if let Some(response) = &input.response {
                 with_text(response.status, |text| each(None, text));
@@ -1619,8 +1627,83 @@ fn for_each_value(
                 each(None, "1");
             }
         }
+        Target::AnomalyTlsUaMismatch => {
+            if input.ja4.is_some_and(|ja4| tls_ua_mismatch(parts, &ja4)) {
+                each(None, "1");
+            }
+        }
     }
     count
+}
+
+/// Whether the User-Agent claims a current browser — Chrome, Edge and the other Chromium ones,
+/// Firefox, Safari, at versions years past their TLS 1.3 — that would not have sent this
+/// ClientHello: every such browser offers TLS 1.3, sends SNI for a host that is a name, and
+/// offers `h2` first in ALPN. A bot's or crawler's UA, an older version, or none claims nothing.
+pub(crate) fn tls_ua_mismatch(parts: &http::request::Parts, ja4: &webfast_core::ja4::Ja4) -> bool {
+    let Some(ua) = parts
+        .headers
+        .get(http::header::USER_AGENT)
+        .and_then(|v| v.to_str().ok())
+    else {
+        return false;
+    };
+    if !claims_current_browser(ua) {
+        return false;
+    }
+    let a = ja4.a().as_bytes();
+    let tls13 = &a[1..3] == b"13";
+    let h2 = &a[8..10] == b"h2";
+    let sni = a[3] == b'd';
+    !tls13 || !h2 || (!sni && !host_is_address(parts))
+}
+
+/// The major version after `marker` in `ua` (`Chrome/131.0…` → 131).
+fn major_after(ua: &str, marker: &str) -> Option<u32> {
+    let at = ua.find(marker)? + marker.len();
+    let digits: &str = &ua[at..][..ua[at..].bytes().take_while(u8::is_ascii_digit).count()];
+    digits.parse().ok()
+}
+
+/// A User-Agent of a current browser, as browsers write theirs.
+fn claims_current_browser(ua: &str) -> bool {
+    if !ua.starts_with("Mozilla/5.0 (") {
+        return false;
+    }
+    let lower_has = |words: &[&str]| {
+        words.iter().any(|w| {
+            ua.as_bytes()
+                .windows(w.len())
+                .any(|win| win.eq_ignore_ascii_case(w.as_bytes()))
+        })
+    };
+    if lower_has(&["bot", "crawl", "spider", "slurp", "preview", "headless"]) {
+        return false;
+    }
+    // Chromium (Chrome, Edge, Opera, Brave …) and Chrome on iOS; Firefox, on iOS too; Safari.
+    let recent = |marker: &str, from: u32| major_after(ua, marker).is_some_and(|v| v >= from);
+    if recent("Chrome/", 90) || recent("CriOS/", 90) || recent("Firefox/", 90) || recent("FxiOS/", 90) {
+        return true;
+    }
+    ua.contains("Safari/") && !ua.contains("Chrome/") && !ua.contains("Chromium/") && recent("Version/", 15)
+}
+
+/// The request's host is an address (`203.0.113.7`, `[2001:db8::1]`), for which no client sends
+/// SNI.
+fn host_is_address(parts: &http::request::Parts) -> bool {
+    let host = parts
+        .uri
+        .host()
+        .or_else(|| parts.headers.get(http::header::HOST).and_then(|v| v.to_str().ok()))
+        .unwrap_or("");
+    let host = host.trim_start_matches('[');
+    let host = host.split(']').next().unwrap_or(host);
+    let host = if host.matches(':').count() == 1 {
+        host.split(':').next().unwrap_or(host)
+    } else {
+        host
+    };
+    host.parse::<IpAddr>().is_ok()
 }
 
 // The transformations.
@@ -2330,6 +2413,7 @@ pub(crate) mod tests {
             country: Some(*b"NL"),
             asn: Some(1136),
             sni: None,
+            ja4: None,
             body: None,
             response: None,
             hidden: &[],
@@ -2412,6 +2496,89 @@ rules:
 
     fn ids(c: &Compiled, eval: &Evaluation) -> Vec<String> {
         eval.hits.iter().map(|h| c.rules[h.rule as usize].id.clone()).collect()
+    }
+
+    /// Who claims a current browser, which host is an address, and when a fingerprint and a
+    /// User-Agent disagree.
+    #[test]
+    fn a_browsers_user_agent_and_its_tls_fingerprint() {
+        let chrome = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+        for (ua, claims) in [
+            (chrome, true),
+            (
+                "Mozilla/5.0 (X11; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0",
+                true,
+            ),
+            (
+                "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1",
+                true,
+            ),
+            (
+                "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/131.0.6778.73 Mobile/15E148 Safari/604.1",
+                true,
+            ),
+            (
+                "Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/49.0.2623.112 Safari/537.36",
+                false,
+            ),
+            (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/12.1 Safari/605.1.15",
+                false,
+            ),
+            (
+                "Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)",
+                false,
+            ),
+            (
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/131.0.0.0 Safari/537.36",
+                false,
+            ),
+            ("curl/8.5.0", false),
+            ("python-requests/2.32.3", false),
+            ("", false),
+        ] {
+            assert_eq!(claims_current_browser(ua), claims, "{ua}");
+        }
+        let parts = |host: &str| {
+            let mut p = request("/", &[("user-agent", chrome)]);
+            p.headers
+                .insert(http::header::HOST, http::HeaderValue::from_str(host).unwrap());
+            p
+        };
+        for (host, address) in [
+            ("www.example.com", false),
+            ("www.example.com:8443", false),
+            ("203.0.113.5", true),
+            ("203.0.113.5:8443", true),
+            ("[2001:db8::1]", true),
+            ("[2001:db8::1]:8443", true),
+        ] {
+            assert_eq!(host_is_address(&parts(host)), address, "{host}");
+        }
+        let ja4 = |text: &str| webfast_core::ja4::Ja4::parse(text).unwrap();
+        let name = parts("www.example.com");
+        let address = parts("203.0.113.5");
+        assert!(!tls_ua_mismatch(&name, &ja4("t13d1516h2_8daaf6152771_e5627efa2ab1")));
+        assert!(
+            tls_ua_mismatch(&name, &ja4("t13d1516h1_8daaf6152771_e5627efa2ab1")),
+            "no h2"
+        );
+        assert!(
+            tls_ua_mismatch(&name, &ja4("t13d151600_8daaf6152771_e5627efa2ab1")),
+            "no ALPN"
+        );
+        assert!(
+            tls_ua_mismatch(&name, &ja4("t12d1516h2_8daaf6152771_e5627efa2ab1")),
+            "TLS 1.2"
+        );
+        assert!(
+            tls_ua_mismatch(&name, &ja4("t13i1516h2_8daaf6152771_e5627efa2ab1")),
+            "no SNI for a name"
+        );
+        assert!(
+            !tls_ua_mismatch(&address, &ja4("t13i1516h2_8daaf6152771_e5627efa2ab1")),
+            "no SNI for an address"
+        );
     }
 
     /// `gt`, `ge`, `lt`, `le`, `eq`, `ne` on a numeric target, and the same comparisons as

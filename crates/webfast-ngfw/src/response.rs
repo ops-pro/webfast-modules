@@ -81,6 +81,7 @@ fn write(
     outcome: Outcome,
     status: u16,
     ip: IpAddr,
+    ja4: Option<webfast_core::ja4::Ja4>,
     req: &http::request::Parts,
     evaluation: &Evaluation,
 ) {
@@ -94,6 +95,7 @@ fn write(
             client_ip: ip,
             country: state.country(ip),
             asn: state.asn(ip),
+            ja4,
             parts: req,
             evaluation: Some(evaluation),
         },
@@ -143,6 +145,7 @@ impl super::Ngfw {
             country: state.country(ip),
             asn: state.asn(ip),
             sni: ctx.conn.sni.as_deref(),
+            ja4: ctx.conn.ja4,
             body: None,
             response: Some(ResponseData {
                 status: parts.status.as_u16(),
@@ -155,7 +158,15 @@ impl super::Ngfw {
         let Some(outcome) = leaks(evaluation.decision(state.threshold)) else {
             return Ok(prefix.body);
         };
-        write(&state, outcome, state.leak_status.as_u16(), ip, &ctx.req, &evaluation);
+        write(
+            &state,
+            outcome,
+            state.leak_status.as_u16(),
+            ip,
+            ctx.conn.ja4,
+            &ctx.req,
+            &evaluation,
+        );
         if outcome == Outcome::LogOnly {
             return Ok(prefix.body);
         }
@@ -184,6 +195,7 @@ impl super::Ngfw {
             country: state.country(ip),
             asn: state.asn(ip),
             sni: ctx.conn.sni.as_deref(),
+            ja4: ctx.conn.ja4,
             body: None,
             response: Some(ResponseData {
                 status,
@@ -197,7 +209,15 @@ impl super::Ngfw {
         match leaks(decision) {
             Some(Outcome::LogOnly) | None => {}
             Some(outcome) => {
-                write(&state, outcome, state.leak_status.as_u16(), ip, &ctx.req, &evaluation);
+                write(
+                    &state,
+                    outcome,
+                    state.leak_status.as_u16(),
+                    ip,
+                    ctx.conn.ja4,
+                    &ctx.req,
+                    &evaluation,
+                );
                 parts.headers.clear();
                 return Err(state.refusal(state.leak_status));
             }
@@ -207,7 +227,15 @@ impl super::Ngfw {
             // No body rule, a `pass`, or no body: decided by the head.
             _ => {
                 if decision == Decision::LogOnly {
-                    write(&state, Outcome::LogOnly, status, ip, &ctx.req, &evaluation);
+                    write(
+                        &state,
+                        Outcome::LogOnly,
+                        status,
+                        ip,
+                        ctx.conn.ja4,
+                        &ctx.req,
+                        &evaluation,
+                    );
                 }
                 return Ok(body);
             }
@@ -220,6 +248,7 @@ impl super::Ngfw {
                 evaluation,
                 status,
                 ip,
+                ja4: ctx.conn.ja4,
                 request: Request::of(&ctx.req),
                 carry: carry.min(MAX_CARRY),
                 tail: 0,
@@ -288,6 +317,7 @@ struct Scan {
     evaluation: Evaluation,
     status: u16,
     ip: IpAddr,
+    ja4: Option<webfast_core::ja4::Ja4>,
     request: Request,
     /// Body bytes still to scan.
     left: usize,
@@ -359,6 +389,7 @@ fn run(evaluation: &mut Evaluation, state: &State, status: u16, ip: IpAddr, text
         country: None,
         asn: None,
         sni: None,
+        ja4: None,
         body: None,
         response: Some(ResponseData {
             status,
@@ -426,6 +457,7 @@ impl Scan {
             Outcome::Cut,
             self.status,
             self.ip,
+            self.ja4,
             &self.request.parts(),
             &self.evaluation,
         );
@@ -444,6 +476,7 @@ impl Drop for Scan {
                 Outcome::LogOnly,
                 self.status,
                 self.ip,
+                self.ja4,
                 &self.request.parts(),
                 &self.evaluation,
             );

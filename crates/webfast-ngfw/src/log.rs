@@ -78,6 +78,8 @@ pub struct Record<'a> {
     pub client_ip: IpAddr,
     pub country: Option<[u8; 2]>,
     pub asn: Option<u32>,
+    /// The client's TLS fingerprint, written when known.
+    pub ja4: Option<webfast_core::ja4::Ja4>,
     pub parts: &'a http::request::Parts,
     pub evaluation: Option<&'a Evaluation>,
 }
@@ -96,7 +98,13 @@ pub fn write(log: &EventLog, compiled: &Compiled, record: &Record<'_>) {
                 .and_then(|c| std::str::from_utf8(c).ok())
                 .unwrap_or("--"),
         );
-        let _ = write!(line, r#"","asn":{},"user_agent":""#, record.asn.unwrap_or(0));
+        let _ = write!(line, r#"","asn":{}"#, record.asn.unwrap_or(0));
+        if let Some(ja4) = &record.ja4 {
+            line.push_str(r#","ja4":""#);
+            line.push_str(ja4.as_str());
+            line.push('"');
+        }
+        line.push_str(r#","user_agent":""#);
         json_escape(
             line,
             record
@@ -276,6 +284,16 @@ mod tests {
                 client_ip: "203.0.113.7".parse().unwrap(),
                 country: Some(*b"NL"),
                 asn: Some(1136),
+                ja4: Some(webfast_core::ja4::fingerprint(
+                    &webfast_core::ja4::Hello {
+                        version: 0x0304,
+                        sni: true,
+                        ciphers: vec![0x1301],
+                        alpn: Some(b"h2".to_vec()),
+                        ..Default::default()
+                    },
+                    false,
+                )),
                 parts: &parts,
                 evaluation: Some(&evaluation),
             },
@@ -290,6 +308,7 @@ mod tests {
                 client_ip: "203.0.113.7".parse().unwrap(),
                 country: None,
                 asn: None,
+                ja4: None,
                 parts: &parts,
                 evaluation: None,
             },
@@ -304,6 +323,12 @@ mod tests {
         assert_eq!(line["request"]["client_ip"], "203.0.113.7");
         assert_eq!(line["request"]["country"], "NL");
         assert_eq!(line["request"]["asn"], 1136);
+        assert_eq!(
+            line["request"]["ja4"].as_str().map(str::len),
+            Some(36),
+            "the fingerprint when known"
+        );
+        assert!(line["request"]["ja4"].as_str().unwrap().starts_with("t13d0100h2_"));
         assert_eq!(line["request"]["method"], "POST");
         assert_eq!(line["request"]["host"], "www.example.com");
         assert_eq!(line["request"]["uri"], "/upload?x=1");
@@ -328,6 +353,7 @@ mod tests {
         assert_eq!(line["decision"], "access");
         assert_eq!(line["reason"], "country");
         assert_eq!(line["request"]["country"], "--");
+        assert!(line["request"].get("ja4").is_none(), "no field when unknown");
         assert!(line.get("hits").is_none());
     }
 }

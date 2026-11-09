@@ -340,6 +340,7 @@ mod tests {
             tls: false,
             trusted: false,
             sni: None,
+            ja4: None,
         });
         let mut builder = http::Request::builder().method(method).uri(path);
         for (name, value) in headers {

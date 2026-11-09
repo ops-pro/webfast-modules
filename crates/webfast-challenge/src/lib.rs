@@ -623,6 +623,7 @@ mod tests {
             tls: true,
             trusted: false,
             sni: None,
+            ja4: None,
         }
     }
 

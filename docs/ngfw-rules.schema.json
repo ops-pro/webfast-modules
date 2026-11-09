@@ -104,6 +104,13 @@
           },
           "default": {}
         },
+        "ja4": {
+          "description": "The connection's TLS fingerprint (JA4), for a rule on `tls.ja4` or what is made of it.\ngo-ftw cannot choose a client's handshake: such an example is run through the engine\nalone (src/ftw.rs), not written as a go-ftw test.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "method": {
           "type": "string",
           "default": "GET"
@@ -869,6 +876,7 @@
             "upload.head",
             "upload.count",
             "tls.sni",
+            "tls.ja4",
             "response.status",
             "response.body",
             "anomaly.double_encoding",
@@ -876,7 +884,8 @@
             "anomaly.duplicate_content_length",
             "anomaly.http10_without_host",
             "anomaly.post_without_content_type",
-            "anomaly.body_type_mismatch"
+            "anomaly.body_type_mismatch",
+            "anomaly.tls_ua_mismatch"
           ]
         },
         {

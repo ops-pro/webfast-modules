@@ -8,13 +8,13 @@ This file is generated from the built-in sets (`crates/webfast-ngfw/src/rules/*.
 UPDATE_RULES_DOC=1 cargo test -p webfast-ngfw the_rules_reference_is_current
 ```
 
-The rule format, the targets, transformations and operators, the composition of the sets with a site's own rules and the exclusions are in [ngfw.md](ngfw.md). Built-in version `2026-11-08`: 98 rules in 12 sets, as `builtin: all` loads them with the `libinjection` feature (without it, wf-942-170 and wf-941-150 are left out).
+The rule format, the targets, transformations and operators, the composition of the sets with a site's own rules and the exclusions are in [ngfw.md](ngfw.md). Built-in version `2026-11-08`: 99 rules in 12 sets, as `builtin: all` loads them with the `libinjection` feature (without it, wf-942-170 and wf-941-150 are left out).
 
 **Severity** is what a hit means, and gives the default score (critical 5, high 4, medium 3, low 2, notice 1; a request is refused at `threshold`, 5 by default). **Confidence** is how rare false positives are: `high`, an honest client practically never sends what the rule matches; `medium`, some sites' ordinary traffic does (the rule's notes say which, and how to exclude it); `low`, the rule is a signal to add up with others rather than a verdict.
 
 ## Contents
 
-- [Set `protocol`](#set-protocol): 20 rules
+- [Set `protocol`](#set-protocol): 21 rules
 - [Set `scanners`](#set-scanners): 5 rules
 - [Set `traversal`](#set-traversal): 3 rules
 - [Set `rfi`](#set-rfi): 2 rules
@@ -61,6 +61,7 @@ targets are facts the parser records while reading the request (docs/ngfw.md, Ta
 | [wf-920-410](#wf-920-410) | head | medium / 3 | medium | score | POST without a Content-Type |
 | [wf-920-440](#wf-920-440) | head | medium / 3 | high | score | Range header with more than 16 parts |
 | [wf-920-520](#wf-920-520) | body | medium / 3 | medium | score | JSON body nested deeper than json_max_depth |
+| [wf-920-600](#wf-920-600) | head | critical / 5 | medium | score | A current browser's User-Agent over a TLS handshake no current browser makes |
 
 ### wf-920-100
 
@@ -424,6 +425,33 @@ ranges. False positives are practically unknown.
 A JSON body nested deeper than `body.json_max_depth` (20 by default): stack exhaustion of
 recursive parsers. Deep documents are rare in forms and APIs; an API that takes them (a
 tree editor, GeoJSON) raises `json_max_depth`.
+
+### wf-920-600
+
+**A current browser's User-Agent over a TLS handshake no current browser makes**
+
+- Set `protocol`, phase `head`
+- Number `920600` (the log's `ruleId`, go-ftw's `rule_id` and `expect_ids`)
+- Targets: `anomaly.tls_ua_mismatch`
+- Transformations: none
+- Operator: `exists`
+- Severity `critical`, score 5, confidence `medium`, action `score`, mode `log_only`
+- Tags: `OWASP_A07`, `protocol`, `automation`, `tls`
+- References: [CWE-290](https://cwe.mitre.org/data/definitions/290.html)
+- Matches: `GET /` with `accept: */*`, `user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36` over TLS `t13d1812h1_85036bcba153_b26ce05bbdd6`, `GET /` with `accept: */*`, `user-agent: Mozilla/5.0 (X11; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0` over TLS `t12d1209h2_d34a8e72043a_b39be8c56a14`, `GET /` with `accept: */*`, `user-agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15` over TLS `t13i191000_9dc949149365_e7c285222651`
+- Does not match: `GET /` with `accept: */*`, `user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36` over TLS `t13d1516h2_8daaf6152771_e5627efa2ab1`, `GET /` with `accept: */*`, `host: 203.0.113.5`, `user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36` over TLS `t13i1515h2_8daaf6152771_e5627efa2ab1`, `GET /` with `accept: */*`, `user-agent: curl/8.5.0` over TLS `t13d3112h1_e8f1e7e78f70_6bebaf5329ac`, `GET /` with `accept: */*`, `user-agent: Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)` over TLS `t13d1812h1_85036bcba153_b26ce05bbdd6`, `GET /` with `accept: */*`, `user-agent: Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/49.0.2623.112 Safari/537.36` over TLS `t12d1209h2_d34a8e72043a_b39be8c56a14`
+
+The User-Agent says Chrome, Edge, Firefox or Safari at a version of the last years, and the
+connection's TLS fingerprint (JA4) has what none of them sends: not TLS 1.3, no SNI for a
+host that is a name, or ALPN without `h2` first. A script or library that borrows a
+browser's User-Agent keeps its own TLS stack, which gives it away; the check needs no list
+of fingerprints to keep up to date. A User-Agent of a bot or crawler, of an older browser,
+or none claims nothing; a connection without a fingerprint (plain HTTP, HTTP/3, a TLS
+terminated in front of the server) is not looked at. The honest mismatch is a TLS-inspecting
+proxy (a corporate one, an antivirus scanning HTTPS) that makes the handshake for a real
+browser: hence `log_only` at first, and the browser challenge rather than a refusal once
+armed, which such a browser passes. A tool that copies a browser's handshake as well
+(curl-impersonate, uTLS) is not caught by this.
 
 ## Set `scanners`
 
@@ -2297,6 +2325,7 @@ browser, and those do not pass through the proxy in front.
 | [CWE-209](https://cwe.mitre.org/data/definitions/209.html) | Error Message Containing Sensitive Information | [wf-950-100](#wf-950-100), [wf-950-110](#wf-950-110), [wf-950-120](#wf-950-120), [wf-950-130](#wf-950-130), [wf-950-140](#wf-950-140) |
 | [CWE-285](https://cwe.mitre.org/data/definitions/285.html) | Improper Authorization | [wf-cve-2025-29927](#wf-cve-2025-29927) |
 | [CWE-287](https://cwe.mitre.org/data/definitions/287.html) | Improper Authentication | [wf-cve-2023-46805](#wf-cve-2023-46805) |
+| [CWE-290](https://cwe.mitre.org/data/definitions/290.html) |  | [wf-920-600](#wf-920-600) |
 | [CWE-306](https://cwe.mitre.org/data/definitions/306.html) | Missing Authentication for Critical Function | [wf-cve-2022-1388](#wf-cve-2022-1388) |
 | [CWE-307](https://cwe.mitre.org/data/definitions/307.html) | Improper Restriction of Excessive Authentication Attempts | [wf-913-200](#wf-913-200) |
 | [CWE-400](https://cwe.mitre.org/data/definitions/400.html) | Uncontrolled Resource Consumption | [wf-920-180](#wf-920-180), [wf-920-190](#wf-920-190), [wf-920-200](#wf-920-200), [wf-920-210](#wf-920-210), [wf-920-440](#wf-920-440) |

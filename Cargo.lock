@@ -1595,8 +1595,8 @@ dependencies = [
 
 [[package]]
 name = "webfast-core"
-version = "0.1.3"
-source = "git+https://github.com/ops-pro/webfast?branch=dev-ci#6c527671f4fb7e4e31b85097305a45ae1b50fea9"
+version = "0.1.4"
+source = "git+https://github.com/ops-pro/webfast?branch=dev-ci#9253abe306eeaf6e8156f82819812defb1771ef4"
 dependencies = [
  "ahash",
  "anyhow",

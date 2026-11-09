@@ -78,6 +78,7 @@ fn head(compiled: &Compiled, parts: &http::request::Parts) -> Decision {
         country: Some(*b"NL"),
         asn: Some(1136),
         sni: Some("www.example.com"),
+        ja4: None,
         body: None,
         response: None,
         hidden: &[],

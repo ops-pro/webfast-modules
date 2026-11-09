@@ -365,3 +365,49 @@ rules:
       A JSON body nested deeper than `body.json_max_depth` (20 by default): stack exhaustion of
       recursive parsers. Deep documents are rare in forms and APIs; an API that takes them (a
       tree editor, GeoJSON) raises `json_max_depth`.
+
+  - id: wf-920-600
+    set: protocol
+    phase: head
+    msg: "A current browser's User-Agent over a TLS handshake no current browser makes"
+    severity: critical
+    confidence: medium
+    # Observed first: written as `log_only` until a site arms it (`override: {wf-920-600: {mode: challenge}}`).
+    mode: log_only
+    targets: [anomaly.tls_ua_mismatch]
+    transform: []
+    operator: exists
+    tags: [OWASP_A07, protocol, automation, tls]
+    refs: { cwe: [CWE-290] }
+    doc: |
+      The User-Agent says Chrome, Edge, Firefox or Safari at a version of the last years, and the
+      connection's TLS fingerprint (JA4) has what none of them sends: not TLS 1.3, no SNI for a
+      host that is a name, or ALPN without `h2` first. A script or library that borrows a
+      browser's User-Agent keeps its own TLS stack, which gives it away; the check needs no list
+      of fingerprints to keep up to date. A User-Agent of a bot or crawler, of an older browser,
+      or none claims nothing; a connection without a fingerprint (plain HTTP, HTTP/3, a TLS
+      terminated in front of the server) is not looked at. The honest mismatch is a TLS-inspecting
+      proxy (a corporate one, an antivirus scanning HTTPS) that makes the handshake for a real
+      browser: hence `log_only` at first, and the browser challenge rather than a refusal once
+      armed, which such a browser passes. A tool that copies a browser's handshake as well
+      (curl-impersonate, uTLS) is not caught by this.
+    # The fingerprints' hashes below are made up: the check reads the first part alone.
+    examples:
+      hit:
+        # Chrome's User-Agent, ALPN without h2 (a library on HTTP/1.1).
+        - { uri: "/", headers: { user-agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36", accept: "*/*" }, ja4: "t13d1812h1_85036bcba153_b26ce05bbdd6" }
+        # Firefox's, over TLS 1.2.
+        - { uri: "/", headers: { user-agent: "Mozilla/5.0 (X11; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0", accept: "*/*" }, ja4: "t12d1209h2_d34a8e72043a_b39be8c56a14" }
+        # Safari's, without SNI for a host that is a name, and without ALPN.
+        - { uri: "/", headers: { user-agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15", accept: "*/*" }, ja4: "t13i191000_9dc949149365_e7c285222651" }
+      pass:
+        # Chrome's User-Agent with a browser-shaped handshake.
+        - { uri: "/", headers: { user-agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36", accept: "*/*" }, ja4: "t13d1516h2_8daaf6152771_e5627efa2ab1" }
+        # No SNI to an address: no browser sends one there.
+        - { uri: "/", headers: { host: "203.0.113.5", user-agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36", accept: "*/*" }, ja4: "t13i1515h2_8daaf6152771_e5627efa2ab1" }
+        # A tool that says what it is claims no browser.
+        - { uri: "/", headers: { user-agent: "curl/8.5.0", accept: "*/*" }, ja4: "t13d3112h1_e8f1e7e78f70_6bebaf5329ac" }
+        # A crawler's User-Agent, which names Chrome too.
+        - { uri: "/", headers: { user-agent: "Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)", accept: "*/*" }, ja4: "t13d1812h1_85036bcba153_b26ce05bbdd6" }
+        # An old browser claims no current one.
+        - { uri: "/", headers: { user-agent: "Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/49.0.2623.112 Safari/537.36", accept: "*/*" }, ja4: "t12d1209h2_d34a8e72043a_b39be8c56a14" }

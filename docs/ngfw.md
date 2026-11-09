@@ -267,7 +267,9 @@ with only the `host` added; with `response: {status, headers, body}`, the backen
 request's bytes as they are (`
 ` written out; an HTTP/1.1 one ends with `Connection: close`),
 for another HTTP version, no Host, a header twice, a byte the parser may refuse: go-ftw's
-`encoded_request`. `status` makes the stage expect that status too, e.g. the parser's 400 for a
+`encoded_request`. `ja4: "t13d…"` gives the connection that fingerprint, for a rule on `tls.ja4`
+or on what is made of it: go-ftw cannot choose a client's handshake, so such an example is run
+through the engine alone (a test of `cargo test`), not written for go-ftw. `status` makes the stage expect that status too, e.g. the parser's 400 for a
 request the filter never sees, in `pass`. A `hit` must make the
 rule match, a `pass` must not; each becomes a go-ftw test (`expect_ids` / `no_expect_ids` with the
 rule's number) in `crates/webfast-ngfw/tests/ftw/rules/<set>/<number>.yaml`, run in `cargo test`
@@ -315,6 +317,8 @@ file's `doc` are for the reference (below) and for whoever reads the file, not f
 | `upload.head`       | the first `upload_head` bytes of the file                                           |
 | `upload.count`      | the number of file parts                                                            |
 | `tls.sni`           | the connection's SNI, `-` without TLS                                               |
+| `tls.ja4`           | the client's JA4 TLS fingerprint (36 characters, `t13d1516h2_…`); no value without one (plain HTTP, HTTP/3, a TLS terminated in front) |
+| `anomaly.tls_ua_mismatch` | `1` when the User-Agent claims a current browser and the fingerprint has what none sends: not TLS 1.3, no SNI for a name, ALPN without `h2` first (wf-920-600) |
 | `response.status`   | (response phase) the status                                                         |
 | `response.headers.<name>` | a response header                                                             |
 | `response.body`     | the first `max_inspect` bytes of the response body                                  |
@@ -529,6 +533,9 @@ One JSON line per event through the core's `webfast_core::eventlog`, extended wi
           "refs":{"cwe":["CWE-434"],"capec":["CAPEC-650"]},
           "target":"upload.head","matched":"<?php"}]}
 ```
+
+`request.ja4` is the client's JA4 fingerprint when the connection has one (TLS over TCP), after
+`asn`; absent otherwise.
 
 Each hit names the rule's `severity`, `tags`, and its `confidence` and `refs` (only the lists
 that are not empty) when it has them, so a SIEM selects by CWE, CVE or OWASP category without a

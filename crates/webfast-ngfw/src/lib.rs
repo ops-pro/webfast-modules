@@ -155,12 +155,21 @@ pub struct Ngfw {
 /// when the server starts (`Module::start`).
 static INSTALLED: ArcSwapOption<Ngfw> = ArcSwapOption::const_empty();
 
+/// What is known of the client besides its address, worked out once per request: its country
+/// and ASN (the geo databases) and its TLS fingerprint (the connection's).
+#[derive(Clone, Copy)]
+struct Peer {
+    country: Option<[u8; 2]>,
+    asn: Option<u32>,
+    ja4: Option<webfast_core::ja4::Ja4>,
+}
+
 /// What the head phase hands the body phase (`Check::Pending`, by value: `Head::Body`): the state
 /// the head ran with, its evaluation so far, and the body's kind.
 pub struct Pending {
     state: Arc<State>,
     evaluation: Evaluation,
-    geo: (Option<[u8; 2]>, Option<u32>),
+    geo: Peer,
     hidden: Arc<[String]>,
     kind: body::Kind,
 }
@@ -459,9 +468,9 @@ impl State {
     }
 
     /// `geo.header`: the client's country code on the request, `--` for none.
-    fn set_geo_header(&self, parts: &mut http::request::Parts, geo: (Option<[u8; 2]>, Option<u32>)) {
+    fn set_geo_header(&self, parts: &mut http::request::Parts, geo: Peer) {
         if let Some(name) = &self.geo_header {
-            let code = geo.0.and_then(|c| HeaderValue::from_bytes(&c).ok());
+            let code = geo.country.and_then(|c| HeaderValue::from_bytes(&c).ok());
             parts
                 .headers
                 .insert(name.clone(), code.unwrap_or_else(|| HeaderValue::from_static("--")));
@@ -648,7 +657,7 @@ impl Ngfw {
         status: StatusCode,
         parts: &http::request::Parts,
         ip: IpAddr,
-        geo: (Option<[u8; 2]>, Option<u32>),
+        geo: Peer,
         evaluation: Option<&Evaluation>,
     ) -> Response<Body> {
         let outcome = match outcome {
@@ -672,8 +681,9 @@ impl Ngfw {
                 status: status.as_u16(),
                 threshold: state.threshold,
                 client_ip: ip,
-                country: geo.0,
-                asn: geo.1,
+                country: geo.country,
+                asn: geo.asn,
+                ja4: geo.ja4,
                 parts,
                 evaluation,
             },
@@ -693,7 +703,7 @@ impl Ngfw {
         reason: Option<&'static str>,
         parts: &http::request::Parts,
         ip: IpAddr,
-        geo: (Option<[u8; 2]>, Option<u32>),
+        geo: Peer,
         evaluation: Option<&Evaluation>,
     ) -> Result<(), Response<Body>> {
         let module = webfast_challenge::instance();
@@ -711,8 +721,9 @@ impl Ngfw {
                 status,
                 threshold: state.threshold,
                 client_ip: ip,
-                country: geo.0,
-                asn: geo.1,
+                country: geo.country,
+                asn: geo.asn,
+                ja4: geo.ja4,
                 parts,
                 evaluation,
             },
@@ -734,7 +745,7 @@ impl Ngfw {
         reason: Option<&'static str>,
         parts: &http::request::Parts,
         ip: IpAddr,
-        geo: (Option<[u8; 2]>, Option<u32>),
+        geo: Peer,
         evaluation: Option<&Evaluation>,
     ) -> Result<(), Response<Body>> {
         Err(self.refuse(
@@ -757,7 +768,7 @@ impl Ngfw {
         conn: &webfast_core::handler::ConnInfo,
         parts: &http::request::Parts,
         ip: IpAddr,
-        geo: (Option<[u8; 2]>, Option<u32>),
+        geo: Peer,
     ) -> Settled {
         let outcome = match evaluation.decision(state.threshold) {
             Decision::Continue => return Settled::Go,
@@ -782,8 +793,9 @@ impl Ngfw {
                         status: state.status.as_u16(),
                         threshold: state.threshold,
                         client_ip: ip,
-                        country: geo.0,
-                        asn: geo.1,
+                        country: geo.country,
+                        asn: geo.asn,
+                        ja4: geo.ja4,
                         parts,
                         evaluation: Some(evaluation),
                     },
@@ -843,7 +855,11 @@ impl Ngfw {
                 .insert(webfast_core::eventlog::HiddenParams(Arc::clone(&hidden)));
         }
         let ip = client.ip;
-        let geo = (state.country(ip), state.asn(ip));
+        let geo = Peer {
+            country: state.country(ip),
+            asn: state.asn(ip),
+            ja4: client.conn.ja4,
+        };
         if state.lists.allowed(ip) {
             state.set_geo_header(parts, geo);
             return Head::Pass;
@@ -868,11 +884,11 @@ impl Ngfw {
             if state
                 .countries
                 .as_ref()
-                .is_some_and(|c| c.refuses(geo.0, fixed.match_path))
+                .is_some_and(|c| c.refuses(geo.country, fixed.match_path))
             {
                 return Pre::Refuse("country");
             }
-            if state.asn.as_ref().is_some_and(|a| a.refuses(geo.1, fixed.match_path)) {
+            if state.asn.as_ref().is_some_and(|a| a.refuses(geo.asn, fixed.match_path)) {
                 return Pre::Refuse("asn");
             }
             if state.honeypots.iter().any(|p| p.matches_path(fixed.match_path)) {
@@ -884,14 +900,14 @@ impl Ngfw {
             if state
                 .countries_challenge
                 .as_ref()
-                .is_some_and(|c| c.refuses(geo.0, fixed.match_path))
+                .is_some_and(|c| c.refuses(geo.country, fixed.match_path))
             {
                 return Pre::Challenge("country");
             }
             if state
                 .asn_challenge
                 .as_ref()
-                .is_some_and(|a| a.refuses(geo.1, fixed.match_path))
+                .is_some_and(|a| a.refuses(geo.asn, fixed.match_path))
             {
                 return Pre::Challenge("asn");
             }
@@ -927,8 +943,9 @@ impl Ngfw {
             let input = Input {
                 parts,
                 client_ip: ip,
-                country: geo.0,
-                asn: geo.1,
+                country: geo.country,
+                asn: geo.asn,
+                ja4: geo.ja4,
                 sni: client.conn.sni.as_deref(),
                 body: None,
                 response: None,
@@ -997,8 +1014,9 @@ impl Ngfw {
         let input = Input {
             parts,
             client_ip: ip,
-            country: geo.0,
-            asn: geo.1,
+            country: geo.country,
+            asn: geo.asn,
+            ja4: geo.ja4,
             sni: client.conn.sni.as_deref(),
             body: Some(&data),
             response: None,
@@ -1017,14 +1035,7 @@ impl Ngfw {
 
     /// A request let through: the headers of the `header` actions that hit, the geo header, and
     /// the `scored` line when it scored and `log.passed` is on.
-    fn finish(
-        &self,
-        state: &State,
-        evaluation: &Evaluation,
-        parts: &mut http::request::Parts,
-        ip: IpAddr,
-        geo: (Option<[u8; 2]>, Option<u32>),
-    ) {
+    fn finish(&self, state: &State, evaluation: &Evaluation, parts: &mut http::request::Parts, ip: IpAddr, geo: Peer) {
         let compiled = &state.compiled;
         for &rule in &evaluation.header_rules {
             for (name, value) in &compiled.rules[rule as usize].headers {
@@ -1041,8 +1052,9 @@ impl Ngfw {
                     status: 0,
                     threshold: state.threshold,
                     client_ip: ip,
-                    country: geo.0,
-                    asn: geo.1,
+                    country: geo.country,
+                    asn: geo.asn,
+                    ja4: geo.ja4,
                     parts,
                     evaluation: Some(evaluation),
                 },
@@ -1092,6 +1104,7 @@ mod tests {
             tls: false,
             trusted: false,
             sni: None,
+            ja4: None,
         }
     }
 
@@ -1254,6 +1267,7 @@ rules:
             tls: false,
             trusted: false,
             sni: None,
+            ja4: None,
         };
         let client = Client {
             ip: conn.remote.ip(),

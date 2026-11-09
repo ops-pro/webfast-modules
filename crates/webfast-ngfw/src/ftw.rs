@@ -330,6 +330,10 @@ fn rule_tests(rule: &Rule, number: u64) -> Result<Vec<Test>, String> {
     let mut tests = Vec::new();
     for (kind, examples) in [("hit", &rule.examples.hit), ("pass", &rule.examples.pass)] {
         for example in examples {
+            // A fingerprint of the connection is the engine's test alone (`examples_on_the_connection`).
+            if matches!(example, Example::Request(r) if r.ja4.is_some()) {
+                continue;
+            }
             let mut stages = match example {
                 Example::Value(value) => value_stages(rule, value)?,
                 Example::Request(request) => vec![request_stage(request)?],
@@ -461,6 +465,10 @@ pub(crate) fn files() -> Result<BTreeMap<PathBuf, String>, String> {
         }
         let number = number_of(&rule.id).ok_or_else(|| format!("{}: a rule with examples has a number", rule.id))?;
         let tests = rule_tests(&rule, number).map_err(|e| format!("{}: {e}", rule.id))?;
+        // Examples on the connection alone: nothing for go-ftw.
+        if tests.is_empty() {
+            continue;
+        }
         let description = rule.msg.clone().unwrap_or_else(|| rule.id.clone());
         files.insert(
             Path::new("rules").join(set).join(format!("{number}.yaml")),
@@ -672,4 +680,66 @@ fn every_built_in_rule_has_an_example_it_matches() {
         .filter(|id| !rules.iter().any(|(_, r)| r.id == *id))
         .collect();
     assert!(unknown.is_empty(), "WITHOUT_EXAMPLES names no rule: {unknown:?}");
+}
+
+/// The examples that need the connection's TLS fingerprint, which go-ftw cannot choose: each
+/// sent through the engine with every built-in set, its `ja4` as the connection's, and the rule
+/// found among the hits (`hit`) or not (`pass`).
+#[test]
+fn the_examples_on_the_connection_hold() {
+    use super::compile::compile;
+    use super::config::{RulesConfig, compose};
+    use super::engine::{Evaluation, Input};
+    use super::rule::{Mode, Phase};
+    let (rules, _) = compose(&RulesConfig::default(), Path::new(".")).unwrap();
+    let compiled = compile(&rules, Mode::Block, &[]).unwrap();
+    let mut ran = 0;
+    let mut wrong = Vec::new();
+    for (_, rule) in builtin_rules() {
+        for (hit, list) in [(true, &rule.examples.hit), (false, &rule.examples.pass)] {
+            for example in list {
+                let Example::Request(request) = example else { continue };
+                let Some(text) = &request.ja4 else { continue };
+                let ja4 = webfast_core::ja4::Ja4::parse(text).unwrap_or_else(|| panic!("{}: ja4 {text:?}", rule.id));
+                let mut builder = http::Request::builder()
+                    .method(request.method.as_str())
+                    .uri(&request.uri);
+                if !request.headers.keys().any(|k| k.eq_ignore_ascii_case("host")) {
+                    builder = builder.header("host", HOST);
+                }
+                for (name, value) in &request.headers {
+                    builder = builder.header(name, value);
+                }
+                let (parts, ()) = builder.body(()).unwrap().into_parts();
+                let input = Input {
+                    parts: &parts,
+                    client_ip: "203.0.113.7".parse().unwrap(),
+                    country: None,
+                    asn: None,
+                    sni: None,
+                    ja4: Some(ja4),
+                    body: None,
+                    response: None,
+                    hidden: &[],
+                };
+                let mut evaluation = Evaluation::new();
+                evaluation.run_phase(&compiled, Phase::Connection, &input, 200);
+                evaluation.run_phase(&compiled, Phase::Head, &input, 200);
+                let found = evaluation
+                    .hits
+                    .iter()
+                    .any(|h| compiled.rules[h.rule as usize].id == rule.id);
+                ran += 1;
+                if found != hit {
+                    let what = if hit { "does not match" } else { "matches" };
+                    wrong.push(format!(
+                        "{} {what} {} {} over {text}",
+                        rule.id, request.method, request.uri
+                    ));
+                }
+            }
+        }
+    }
+    assert!(ran > 0, "no example on the connection");
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }

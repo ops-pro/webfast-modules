@@ -376,6 +376,9 @@ fn example(example: &Example) -> String {
             if let Some(response) = &request.response {
                 text.push_str(&format!(", answered {}", response.status));
             }
+            if let Some(ja4) = &request.ja4 {
+                text.push_str(&format!(" over TLS {}", code(ja4)));
+            }
             text
         }
     }

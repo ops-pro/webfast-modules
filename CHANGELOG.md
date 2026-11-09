@@ -43,6 +43,15 @@
   with JWT `from_params`); the ban list is looked up once for the ban and the challenge mark.
 - The browser challenge: a `js` or `cookie` answer that is not 64 characters is refused before the
   nonce's hash is computed.
+- **The client's TLS fingerprint in the filter** (webfast-core's `ConnInfo::ja4`): the target
+  `tls.ja4` (no value without a fingerprint), `request.ja4` in the log lines, and
+  `anomaly.tls_ua_mismatch` with the rule wf-920-600: a User-Agent of a current Chrome, Edge,
+  Firefox or Safari over a handshake none of them makes (not TLS 1.3, no SNI for a host that is a
+  name, ALPN without `h2` first), with no list of fingerprints to keep current; a bot's, an old
+  browser's or no User-Agent claims nothing. The rule is `log_only` until a site arms it
+  (`override: {wf-920-600: {mode: challenge}}`: a TLS-inspecting proxy in front of a real browser is
+  the honest mismatch, and passes the challenge). Examples may give the connection a `ja4`; they
+  run through the engine, not go-ftw. Needs webfast-core with `ConnInfo::ja4`.
 
 ## 0.1.1 — 2026-11-08
 

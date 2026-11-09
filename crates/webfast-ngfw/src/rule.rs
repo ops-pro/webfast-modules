@@ -114,6 +114,10 @@ pub struct ExampleRequest {
     /// The status the server must answer: for a request refused before the filter sees it (the
     /// HTTP parser's 400), with the example in `pass`.
     pub status: Option<u16>,
+    /// The connection's TLS fingerprint (JA4), for a rule on `tls.ja4` or what is made of it.
+    /// go-ftw cannot choose a client's handshake: such an example is run through the engine
+    /// alone (src/ftw.rs), not written as a go-ftw test.
+    pub ja4: Option<String>,
 }
 
 /// A backend's answer for a `response` example.
@@ -439,6 +443,8 @@ pub enum Target {
     UploadHead,
     UploadCount,
     TlsSni,
+    /// The client's JA4 TLS fingerprint (36 characters), when the connection has one.
+    TlsJa4,
     ResponseStatus,
     ResponseHeader(String),
     ResponseBody,
@@ -454,6 +460,10 @@ pub enum Target {
     AnomalyPostWithoutContentType,
     /// `1` when the body is declared JSON and its bytes are not JSON.
     AnomalyBodyTypeMismatch,
+    /// `1` when the User-Agent claims a current browser and the connection's TLS fingerprint has
+    /// what no current browser sends: not TLS 1.3, no SNI (for a host that is a name), or `h2`
+    /// not offered first in ALPN.
+    AnomalyTlsUaMismatch,
 }
 
 impl TryFrom<String> for Target {
@@ -494,6 +504,7 @@ impl std::str::FromStr for Target {
             "upload.head" => Target::UploadHead,
             "upload.count" => Target::UploadCount,
             "tls.sni" => Target::TlsSni,
+            "tls.ja4" => Target::TlsJa4,
             "response.status" => Target::ResponseStatus,
             "response.body" => Target::ResponseBody,
             "anomaly.double_encoding" => Target::AnomalyDoubleEncoding,
@@ -502,6 +513,7 @@ impl std::str::FromStr for Target {
             "anomaly.http10_without_host" => Target::AnomalyHttp10WithoutHost,
             "anomaly.post_without_content_type" => Target::AnomalyPostWithoutContentType,
             "anomaly.body_type_mismatch" => Target::AnomalyBodyTypeMismatch,
+            "anomaly.tls_ua_mismatch" => Target::AnomalyTlsUaMismatch,
             _ => {
                 let named = |prefix: &str| text.strip_prefix(prefix).filter(|n| !n.is_empty());
                 if let Some(name) = named("args.") {
@@ -554,6 +566,7 @@ impl fmt::Display for Target {
             Target::UploadHead => f.write_str("upload.head"),
             Target::UploadCount => f.write_str("upload.count"),
             Target::TlsSni => f.write_str("tls.sni"),
+            Target::TlsJa4 => f.write_str("tls.ja4"),
             Target::ResponseStatus => f.write_str("response.status"),
             Target::ResponseHeader(name) => write!(f, "response.headers.{name}"),
             Target::ResponseBody => f.write_str("response.body"),
@@ -563,6 +576,7 @@ impl fmt::Display for Target {
             Target::AnomalyHttp10WithoutHost => f.write_str("anomaly.http10_without_host"),
             Target::AnomalyPostWithoutContentType => f.write_str("anomaly.post_without_content_type"),
             Target::AnomalyBodyTypeMismatch => f.write_str("anomaly.body_type_mismatch"),
+            Target::AnomalyTlsUaMismatch => f.write_str("anomaly.tls_ua_mismatch"),
         }
     }
 }
@@ -573,7 +587,9 @@ impl Target {
     pub fn phases(&self) -> &'static [Phase] {
         use Phase::*;
         match self {
-            Target::ClientIp | Target::Country | Target::Asn | Target::TlsSni => &[Connection, Head, Body, Upload],
+            Target::ClientIp | Target::Country | Target::Asn | Target::TlsSni | Target::TlsJa4 => {
+                &[Connection, Head, Body, Upload]
+            }
             Target::Body
             | Target::BodyJson
             | Target::BodyJsonPointer(_)
@@ -901,6 +917,7 @@ pub(crate) mod schema {
         "upload.head",
         "upload.count",
         "tls.sni",
+        "tls.ja4",
         "response.status",
         "response.body",
         "anomaly.double_encoding",
@@ -909,6 +926,7 @@ pub(crate) mod schema {
         "anomaly.http10_without_host",
         "anomaly.post_without_content_type",
         "anomaly.body_type_mismatch",
+        "anomaly.tls_ua_mismatch",
     ];
 
     impl JsonSchema for Target {
