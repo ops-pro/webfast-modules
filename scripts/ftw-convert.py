@@ -70,6 +70,11 @@ OUT_ROOT = NGFW / "tests" / "ftw"
 SQLI_RULE = "wf-942-170"
 XSS_RULE = "wf-941-150"
 
+# The `rule_id` of the two files that are about no one rule: go-ftw takes 0 for a missing field.
+# Section 999 has no rules (checked against docs/ngfw-rules.md), so these stand for none.
+NEIGHBOURS_NUMBER = 999001
+BENIGN_NUMBER = 999002
+
 DEST_ADDR = "127.0.0.1"
 PORT = 80
 HOST = ("host", "www.example.com")
@@ -437,9 +442,11 @@ def build():
             ],
         )
 
+    if any(n // 1000 == 999 for n in numbers.values()):
+        raise ConvertError("docs/ngfw-rules.md has a rule in section 999, the test sets' numbers")
     files[rel("crates", "webfast-ngfw", "tests", "ftw", "cve", "neighbours.yaml")] = file_doc(
         "neighbours",
-        0,
+        NEIGHBOURS_NUMBER,
         "Ordinary requests to the same products and paths as the cve rules' CVEs: "
         "no cve rule may trigger.",
         [
@@ -505,7 +512,7 @@ def build():
         ),
     )
     for path, rule_id, values, status, desc, meta_description in corpus_files:
-        number = checked_number(numbers, rule_id) if rule_id else 0
+        number = checked_number(numbers, rule_id) if rule_id else BENIGN_NUMBER
         name = Path(path).stem
         files[path] = file_doc(name, number, meta_description, corpus_tests(values, desc))
 
@@ -526,8 +533,8 @@ def validate(doc, path):
     where = f"{path}: "
     if not isinstance(doc, dict) or not {"meta", "rule_id", "tests"} <= doc.keys():
         raise ConvertError(f"{where}missing meta, rule_id or tests")
-    if not isinstance(doc["rule_id"], int):
-        raise ConvertError(f"{where}rule_id is not an integer")
+    if not isinstance(doc["rule_id"], int) or doc["rule_id"] <= 0:
+        raise ConvertError(f"{where}rule_id is not a positive integer")
     for test in doc["tests"]:
         if not isinstance(test, dict) or not {"test_id", "stages"} <= test.keys():
             raise ConvertError(f"{where}a test misses test_id or stages")

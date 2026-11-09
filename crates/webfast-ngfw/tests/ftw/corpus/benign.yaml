@@ -4,7 +4,7 @@ meta:
   description: 'The benign values of the detectors'' evaluation set: the whole filter lets each through, in a query (both spellings of a space) and in a cookie.'
   enabled: true
   name: benign
-rule_id: 0
+rule_id: 999002
 tests:
 - test_id: 1
   desc: Benign value 1 of 104

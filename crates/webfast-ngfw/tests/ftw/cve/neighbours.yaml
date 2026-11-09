@@ -4,7 +4,7 @@ meta:
   description: 'Ordinary requests to the same products and paths as the cve rules'' CVEs: no cve rule may trigger.'
   enabled: true
   name: neighbours
-rule_id: 0
+rule_id: 999001
 tests:
 - test_id: 1
   desc: 'An ordinary request to the same product or path (1 of 20): no rule of the cve set triggers.'

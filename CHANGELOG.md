@@ -6,7 +6,8 @@
   Rust tests by `scripts/ftw-convert.py`: each `cve` rule's request and its neighbours, and the
   SQL injection, XSS and benign values of the detectors' corpus, each in a query (a space as
   `%20` and as `+`) and in a cookie. `--check` fails when the files differ from what the sources
-  give.
+  give. The neighbours and the benign values, about no one rule, have the `rule_id`s 999001 and
+  999002 (section 999 has no rules): go-ftw takes 0 for a missing one.
 
 ## 0.1.1 — 2026-11-08
 
