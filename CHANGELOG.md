@@ -1,6 +1,24 @@
 # Changelog
 
-## Unreleased
+## 0.1.2 — 2026-11-09
+
+The filter takes up the client's TLS fingerprint (JA4) and flags a browser's User-Agent over a
+handshake no browser makes; a rule's tests live in the rule, with a JSON Schema for the rules
+files and go-ftw tests written from both; comparison operators beside `gt`; a corpus of known
+evasions; fewer per-request copies in the head check.
+
+Worth knowing when upgrading from 0.1.1:
+
+- The crates need webfast-core with `ConnInfo::ja4` (webfast's `dev-ci` from 9253abe, webfast
+  0.1.5): a `ConnInfo` made by hand needs `ja4: None`.
+- A new built-in rule, wf-920-600 (`log_only`): a log line for each request whose User-Agent
+  claims a current browser over a TLS handshake none makes. It refuses nothing until a site arms
+  it (`override: {wf-920-600: {mode: challenge}}`); `disable: [wf-920-600]` silences it.
+- Log lines carry `request.ja4` when the connection has a fingerprint.
+- Rules files may have `examples` (the format is otherwise unchanged); docs/ngfw-rules.schema.json
+  describes the format for editors and tools.
+
+### Changes
 
 - **A rule's tests are in the rule**: `examples`, with `hit` (requests it must match) and `pass`
   (requests it must not), each a value put in the rule's targets (a query parameter both ways, a

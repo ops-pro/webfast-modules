@@ -1576,7 +1576,7 @@ dependencies = [
 
 [[package]]
 name = "webfast-challenge"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "ahash",
  "anyhow",
@@ -1639,7 +1639,7 @@ dependencies = [
 
 [[package]]
 name = "webfast-ngfw"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "aho-corasick",
  "anyhow",
