@@ -1,0 +1,39 @@
+# Written by src/ftw.rs from its source (a rule's `examples`, a list of tests/corpus/): edit
+# that, then `UPDATE_FTW_TESTS=1 cargo test -p webfast-ngfw --lib ftw`.
+meta:
+  author: "webfast"
+  description: "ThinkPHP invokefunction through the router (CVE-2018-20062)"
+  enabled: true
+  name: "wf-cve-2018-20062"
+rule_id: 20180020062
+tests:
+  - test_id: 1
+    desc: "wf-cve-2018-20062 matches"
+    stages:
+      - description: "request"
+        input:
+          dest_addr: "127.0.0.1"
+          port: 80
+          method: "GET"
+          uri: "/index.php?s=index/%5Cthink%5Capp/invokefunction"
+          version: "HTTP/1.1"
+          headers:
+            "host": "www.example.com"
+        output:
+          log:
+            expect_ids: [20180020062]
+  - test_id: 2
+    desc: "wf-cve-2018-20062 lets it be"
+    stages:
+      - description: "request"
+        input:
+          dest_addr: "127.0.0.1"
+          port: 80
+          method: "GET"
+          uri: "/index.php?s=index/index/hello"
+          version: "HTTP/1.1"
+          headers:
+            "host": "www.example.com"
+        output:
+          log:
+            no_expect_ids: [20180020062]

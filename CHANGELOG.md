@@ -2,25 +2,39 @@
 
 ## Unreleased
 
-- The filter's rule tests as go-ftw YAML (`crates/webfast-ngfw/tests/ftw/`), generated from the
-  Rust tests by `scripts/ftw-convert.py`: each `cve` rule's request and its neighbours, and the
-  SQL injection, XSS and benign values of the detectors' corpus, each in a query (a space as
-  `%20` and as `+`) and in a cookie. `--check` fails when the files differ from what the sources
-  give. The neighbours and the benign values, about no one rule, have the `rule_id`s 999001 and
-  999002 (section 999 has no rules): go-ftw takes 0 for a missing one.
+- **A rule's tests are in the rule**: `examples`, with `hit` (requests it must match) and `pass`
+  (requests it must not), each a value put in the rule's targets (a query parameter both ways, a
+  cookie, a header, the path, a form or JSON body) or a request written out (`method`, `uri`,
+  `headers`, `body`, and `response` for what the backend answers), or a request's raw bytes
+  (`raw`, go-ftw's `encoded_request`), with the `status` expected if it matters. The raw examples
+  showed that over HTTP/1.1 wf-920-120 never sees its byte (the server's parser answers 400
+  first) and wf-920-170 never sees a doubled framing (the parser settles it before the filter);
+  wf-920-110 matches an HTTP/1.0 request without Host. The `cve` set's rules carry the
+  cases of the Rust test they replace. `docs/ngfw-rules.md` lists them with each rule; a site's
+  own rules may have them too. A test lists the built-in rules still without a `hit` example.
+- **The rules files' JSON Schema**, `docs/ngfw-rules.schema.json`, made from the types the server
+  reads them with (a test keeps it current, `UPDATE_RULES_DOC=1` writes it with the reference):
+  every field, target, transformation and operator with what it means; the built-in files name it
+  for the YAML language server.
+- **The go-ftw tests** (`crates/webfast-ngfw/tests/ftw/`) are written from the rules' `examples`
+  (`rules/<set>/<number>.yaml`, `expect_ids` / `no_expect_ids` with the rule's number) and from the
+  corpus, now plain lists in `tests/corpus/*.txt` (one value per line, SecLists' format; sqli, xss,
+  bypass and benign, each in a query both ways and in a cookie, 403 or 200; `rule_id`s 999002 to
+  999005). `src/ftw.rs` writes them (`UPDATE_FTW_TESTS=1`) and a test fails when they are out of
+  date; `scripts/ftw-convert.py` is gone. `tests/ftw.rs` runs them in process in `cargo test`, two
+  passes as in CI, with a backend that answers `/reflect` as albedo does.
 - `scripts/ftw-run.sh` and CI's `ftw` job: the go-ftw tests against webfast's binary built with
   the checkout's modules (`ci/ftw/compose.yaml`, go-ftw 2.6.2 and albedo 0.3.0 pinned), a pass
-  with every built-in set (three tests that wf-913-220 answers first are ignored, each with its
-  reason) and a pass with the cve set alone.
+  with every built-in set (one test that wf-913-220 answers first is ignored, with its reason) and
+  a pass with the cve set alone.
 - The filter's comparison operators: besides `gt`, `ge`, `lt`, `le`, `eq` and `ne` on a numeric
   target; `count_ge` … `count_ne` besides `count_gt` (the number of the target's values) and
   `length_ge` … `length_ne` besides `length_gt` (each value's length). One matcher compares for
   all of them; the rules that use `gt`, `count_gt` and `length_gt` are unchanged.
 - A `BYPASS` corpus beside SQLI and XSS: 61 known WAF evasions (comments and encodings inside
   keywords, spaces swapped or left out, entities and escapes, tags and attributes closed or split)
-  that the built-in sets must keep refusing, in the Rust test and as go-ftw's `corpus/bypass.yaml`
-  (`rule_id` 999003). A regression set: it holds what the sets catch. The converter now gives each
-  corpus file its `rule_id` explicitly.
+  that the built-in sets must keep refusing, in the Rust test and as go-ftw's `corpus/bypass.yaml`.
+  A regression set: it holds what the sets catch.
 - docs/ngfw.md: the feeds' example is Spamhaus DROP and blocklist.de, with how a feed is fetched,
   parsed and kept; EDROP is merged into DROP, and a list with the bogons in it (FireHOL level 1
   has the loopback and the private ranges) denies a health check and internal clients.

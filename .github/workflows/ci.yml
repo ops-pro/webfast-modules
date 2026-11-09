@@ -77,7 +77,8 @@ jobs:
 
   # The filter's go-ftw tests, blackbox: webfast's binary (its dev-ci, which follows this
   # repository's main) built static with this checkout's modules in place of the git ones, then
-  # scripts/ftw-run.sh: every built-in set, then the cve set alone.
+  # scripts/ftw-run.sh: every built-in set, then the cve set alone. That the files are current
+  # (src/ftw.rs writes them from the rules' examples and tests/corpus/) is a test of `test`.
   ftw:
     runs-on: ubuntu-24.04
     steps:
@@ -89,10 +90,7 @@ jobs:
           repository: ops-pro/webfast
           ref: dev-ci
           path: webfast
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends musl-tools python3-yaml
-      - name: the go-ftw YAML tests are current
-        working-directory: webfast-modules
-        run: python3 scripts/ftw-convert.py --check
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends musl-tools
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-unknown-linux-musl

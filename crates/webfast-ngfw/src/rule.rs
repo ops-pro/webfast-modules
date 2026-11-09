@@ -6,6 +6,7 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::fmt;
 
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[derive(Deserialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct Rule {
@@ -50,9 +51,98 @@ pub struct Rule {
     /// What the rule catches, why its score, where false positives come from, how to exclude
     /// it: for docs/ngfw-rules.md, not used by the server.
     pub doc: Option<String>,
+    /// Requests the rule must match (`hit`) and must not match (`pass`): its tests, run in
+    /// process and, written as go-ftw files, against a binary; not used by the server.
+    #[serde(default)]
+    pub examples: Examples,
+}
+
+/// A rule's examples: what it must match and what it must let be.
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[derive(Deserialize, Debug, Clone, Default, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Examples {
+    /// Each one makes the rule match.
+    #[serde(default)]
+    pub hit: Vec<Example>,
+    /// None makes the rule match: the near misses, the honest look-alikes.
+    #[serde(default)]
+    pub pass: Vec<Example>,
+}
+
+impl Examples {
+    pub fn is_empty(&self) -> bool {
+        self.hit.is_empty() && self.pass.is_empty()
+    }
+}
+
+/// One example: a value, put where the rule looks (each of its targets that has a place in a
+/// request: a query parameter, a cookie, a header, the path, a form or JSON body), or a request
+/// written out whole, for what a value alone does not say (a path, a method, a missing header, a
+/// response from the backend).
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+#[serde(untagged)]
+pub enum Example {
+    Value(String),
+    Request(ExampleRequest),
+}
+
+/// A request written out: sent as it is, the `host` added when it has none (no User-Agent nor
+/// Accept are added: an example of a rule on their absence needs them absent).
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ExampleRequest {
+    #[serde(default = "Example::get")]
+    pub method: String,
+    /// The request target as sent: percent-encoded where it has to be.
+    #[serde(default = "Example::root")]
+    pub uri: String,
+    /// Names as given, lowercase by convention.
+    #[serde(default)]
+    pub headers: BTreeMap<String, String>,
+    pub body: Option<String>,
+    /// What the backend answers, for a rule of the `response` phase: sent to the backend's
+    /// `/reflect` (albedo's), which answers with it.
+    pub response: Option<ExampleResponse>,
+    /// The request's bytes, sent as they are on a connection of their own (`\r\n` line ends
+    /// written out), for what the fields above cannot say: another HTTP version, no Host, a
+    /// header twice, a byte the HTTP parser may refuse. With it, none of the fields above. An
+    /// HTTP/1.1 one ends its head with `Connection: close`, so the server closes after answering.
+    pub raw: Option<String>,
+    /// The status the server must answer: for a request refused before the filter sees it (the
+    /// HTTP parser's 400), with the example in `pass`.
+    pub status: Option<u16>,
+}
+
+/// A backend's answer for a `response` example.
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ExampleResponse {
+    #[serde(default = "Example::ok")]
+    pub status: u16,
+    #[serde(default)]
+    pub headers: BTreeMap<String, String>,
+    #[serde(default)]
+    pub body: String,
+}
+
+impl Example {
+    fn get() -> String {
+        "GET".to_string()
+    }
+    fn root() -> String {
+        "/".to_string()
+    }
+    fn ok() -> u16 {
+        200
+    }
 }
 
 /// A rules file: its description (`doc`, for docs/ngfw-rules.md), `rules:` and its list.
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[derive(Deserialize, Debug, Default)]
 #[serde(deny_unknown_fields)]
 pub struct RulesFile {
@@ -61,6 +151,7 @@ pub struct RulesFile {
     pub rules: Vec<Rule>,
 }
 
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Phase {
@@ -102,6 +193,7 @@ impl Phase {
     }
 }
 
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Severity {
@@ -137,6 +229,7 @@ impl Severity {
 }
 
 /// How rare a rule's false positives are: the axis next to `severity` (what a hit means).
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Confidence {
@@ -160,6 +253,7 @@ impl Confidence {
 
 /// What a rule refers to: weaknesses (CWE), attack patterns (CAPEC), the OWASP Core Rule Set's
 /// rules it corresponds to (CRS ids, numbers), vulnerabilities (CVE), advisories (URLs).
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[derive(Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Refs {
@@ -225,6 +319,7 @@ impl Refs {
     }
 }
 
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Action {
@@ -254,6 +349,7 @@ impl Action {
     }
 }
 
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Mode {
@@ -275,6 +371,7 @@ impl Mode {
     }
 }
 
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum Transform {
@@ -531,6 +628,7 @@ impl Target {
 }
 
 /// The one test of a rule (docs/ngfw.md "Operators").
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum Operator {
@@ -565,6 +663,7 @@ pub enum Operator {
     IpIn(Vec<String>),
     CountryIn(Vec<String>),
     #[serde(deserialize_with = "asn_list")]
+    #[cfg_attr(test, schemars(with = "Vec<schema::Asn>"))]
     AsnIn(Vec<u32>),
     MagicNot(Vec<String>),
     MagicIs(Vec<String>),
@@ -762,6 +861,126 @@ impl fmt::Display for IdPattern {
             IdPattern::Exact(id) => f.write_str(id),
             IdPattern::Prefix(prefix) => write!(f, "{prefix}*"),
         }
+    }
+}
+
+/// The JSON Schema of a rules file (docs/ngfw-rules.schema.json), made in the tests from the
+/// types serde reads: what serde's derive cannot say (a target's text, an ASN as a number or
+/// `AS…`) is written here.
+#[cfg(test)]
+pub(crate) mod schema {
+    use super::{RulesFile, Target};
+    use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
+    use std::borrow::Cow;
+
+    /// The targets of a fixed name; the named ones are `args.<name>`, `headers.<name>`,
+    /// `cookies.<name>`, `response.headers.<name>` and `body.json/<pointer>`.
+    pub const FIXED_TARGETS: &[&str] = &[
+        "method",
+        "version",
+        "path",
+        "path_raw",
+        "query",
+        "args",
+        "args_names",
+        "args_count",
+        "headers",
+        "headers_names",
+        "cookies",
+        "cookies_names",
+        "ua",
+        "host",
+        "client_ip",
+        "country",
+        "asn",
+        "body",
+        "body.json",
+        "upload.filename",
+        "upload.ext",
+        "upload.type",
+        "upload.head",
+        "upload.count",
+        "tls.sni",
+        "response.status",
+        "response.body",
+        "anomaly.double_encoding",
+        "anomaly.json_depth",
+        "anomaly.duplicate_content_length",
+        "anomaly.http10_without_host",
+        "anomaly.post_without_content_type",
+        "anomaly.body_type_mismatch",
+    ];
+
+    impl JsonSchema for Target {
+        fn schema_name() -> Cow<'static, str> {
+            "Target".into()
+        }
+
+        fn json_schema(_: &mut SchemaGenerator) -> Schema {
+            json_schema!({
+                "description": "What the rule looks at (docs/ngfw.md \"Targets\"): a fixed name, or a named parameter, header, cookie, response header, or a JSON pointer into the body.",
+                "anyOf": [
+                    { "enum": FIXED_TARGETS },
+                    { "type": "string", "pattern": "^(args|headers|cookies|response\\.headers)\\..+$" },
+                    { "type": "string", "pattern": "^body\\.json/.*$" }
+                ]
+            })
+        }
+    }
+
+    /// An ASN of `asn_in`: a number, or `AS` and a number.
+    pub struct Asn;
+
+    impl JsonSchema for Asn {
+        fn schema_name() -> Cow<'static, str> {
+            "Asn".into()
+        }
+
+        fn json_schema(_: &mut SchemaGenerator) -> Schema {
+            json_schema!({
+                "description": "An autonomous system: its number, or `AS` and its number.",
+                "anyOf": [
+                    { "type": "integer", "minimum": 0, "maximum": 4294967295u32 },
+                    { "type": "string", "pattern": "^AS[0-9]+$" }
+                ]
+            })
+        }
+    }
+
+    /// The schema as the file holds it: pretty JSON and a newline.
+    pub fn text() -> String {
+        let mut schema = schemars::schema_for!(RulesFile);
+        schema.insert(
+            "$id".to_string(),
+            "https://github.com/ops-pro/webfast-modules/blob/main/docs/ngfw-rules.schema.json".into(),
+        );
+        schema.insert("title".to_string(), "webfast-ngfw rules file".into());
+        let mut text = serde_json::to_string_pretty(&schema).unwrap();
+        text.push('\n');
+        text
+    }
+
+    #[test]
+    fn every_fixed_target_parses_and_prints_its_name() {
+        for name in FIXED_TARGETS {
+            let target: Target = name.parse().unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert_eq!(target.to_string(), *name);
+        }
+    }
+
+    #[test]
+    fn the_rules_schema_is_current() {
+        let text = text();
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/ngfw-rules.schema.json");
+        if std::env::var_os("UPDATE_RULES_DOC").is_some() {
+            std::fs::write(&path, &text).unwrap();
+            return;
+        }
+        let current = std::fs::read_to_string(&path).unwrap_or_default().replace("\r\n", "\n");
+        assert!(
+            current == text,
+            "docs/ngfw-rules.schema.json is out of date: run `UPDATE_RULES_DOC=1 cargo test -p webfast-ngfw`"
+        );
     }
 }
 

@@ -66,3 +66,5 @@ tempfile.workspace = true
 tokio-stream.workspace = true
 # The challenge cases hash the nonce as the page's script would.
 aws-lc-rs.workspace = true
+# The rules files' JSON Schema (docs/ngfw-rules.schema.json), made from the types serde reads.
+schemars.workspace = true

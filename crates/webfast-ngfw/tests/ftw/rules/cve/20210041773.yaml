@@ -1,0 +1,39 @@
+# Written by src/ftw.rs from its source (a rule's `examples`, a list of tests/corpus/): edit
+# that, then `UPDATE_FTW_TESTS=1 cargo test -p webfast-ngfw --lib ftw`.
+meta:
+  author: "webfast"
+  description: "Apache HTTP Server 2.4.49 path traversal with an encoded dot (CVE-2021-41773)"
+  enabled: true
+  name: "wf-cve-2021-41773"
+rule_id: 20210041773
+tests:
+  - test_id: 1
+    desc: "wf-cve-2021-41773 matches"
+    stages:
+      - description: "request"
+        input:
+          dest_addr: "127.0.0.1"
+          port: 80
+          method: "GET"
+          uri: "/icons/.%2e/%2e%2e/x"
+          version: "HTTP/1.1"
+          headers:
+            "host": "www.example.com"
+        output:
+          log:
+            expect_ids: [20210041773]
+  - test_id: 2
+    desc: "wf-cve-2021-41773 lets it be"
+    stages:
+      - description: "request"
+        input:
+          dest_addr: "127.0.0.1"
+          port: 80
+          method: "GET"
+          uri: "/icons/apache_pb.png"
+          version: "HTTP/1.1"
+          headers:
+            "host": "www.example.com"
+        output:
+          log:
+            no_expect_ids: [20210041773]

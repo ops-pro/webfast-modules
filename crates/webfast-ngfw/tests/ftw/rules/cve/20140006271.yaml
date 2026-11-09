@@ -1,0 +1,41 @@
+# Written by src/ftw.rs from its source (a rule's `examples`, a list of tests/corpus/): edit
+# that, then `UPDATE_FTW_TESTS=1 cargo test -p webfast-ngfw --lib ftw`.
+meta:
+  author: "webfast"
+  description: "Shellshock: a bash function definition at the start of a header or parameter (CVE-2014-6271)"
+  enabled: true
+  name: "wf-cve-2014-6271"
+rule_id: 20140006271
+tests:
+  - test_id: 1
+    desc: "wf-cve-2014-6271 matches"
+    stages:
+      - description: "request"
+        input:
+          dest_addr: "127.0.0.1"
+          port: 80
+          method: "GET"
+          uri: "/cgi-bin/status"
+          version: "HTTP/1.1"
+          headers:
+            "host": "www.example.com"
+            "user-agent": "() { :; };"
+        output:
+          log:
+            expect_ids: [20140006271]
+  - test_id: 2
+    desc: "wf-cve-2014-6271 lets it be"
+    stages:
+      - description: "request"
+        input:
+          dest_addr: "127.0.0.1"
+          port: 80
+          method: "GET"
+          uri: "/cgi-bin/status"
+          version: "HTTP/1.1"
+          headers:
+            "host": "www.example.com"
+            "user-agent": "Mozilla/5.0 (compatible; bot/1.0)"
+        output:
+          log:
+            no_expect_ids: [20140006271]

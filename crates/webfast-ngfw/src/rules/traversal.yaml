@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=../../../../docs/ngfw-rules.schema.json
 doc: |
   Set `traversal` (wf-930-*): path traversal and local file inclusion. `../` and `..\` in any
   encoding, the files every traversal payload reaches for (/etc/passwd, win.ini, boot.ini),

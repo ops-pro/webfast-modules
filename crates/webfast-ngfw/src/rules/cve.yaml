@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=../../../../docs/ngfw-rules.schema.json
 doc: |
   Set `cve` (wf-cve-*): known, exploited vulnerabilities of web products, each by the narrow
   signature of its exploit request (a path, a header, a parameter name or value) rather than by
@@ -32,6 +33,11 @@ rules:
       The exploit puts `() { :; }; command` at the start of the User-Agent, the Referer or a
       cookie. The rule matches a header or parameter value that starts with `() {`. No browser or
       form sends that; the risk of a false positive is negligible.
+    examples:
+      hit:
+        - { uri: "/cgi-bin/status", headers: { user-agent: "() { :; };" } }
+      pass:
+        - { uri: "/cgi-bin/status", headers: { user-agent: "Mozilla/5.0 (compatible; bot/1.0)" } }
 
   - id: wf-cve-2017-5638
     set: cve
@@ -54,6 +60,11 @@ rules:
       Content-Type is put into an error message that is evaluated as OGNL, so
       `Content-Type: %{(#_='multipart/form-data')...}` runs commands (the Equifax breach). The
       rule matches `%{` or `${` in the Content-Type, which no media type has.
+    examples:
+      hit:
+        - { uri: "/upload.action", headers: { content-type: "%{#context}.multipart/form-data" } }
+      pass:
+        - { uri: "/upload.action", headers: { content-type: "multipart/form-data; boundary=x" } }
 
   - id: wf-cve-2017-9841
     set: cve
@@ -78,6 +89,11 @@ rules:
       variants under other directories. The rule matches the script's path wherever it is (the
       scanners set's wf-913-220 covers `/vendor/phpunit` only). No site serves this file on
       purpose.
+    examples:
+      hit:
+        - { uri: "/vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php" }
+      pass:
+        - { uri: "/vendor/phpunit/phpunit/README.md" }
 
   - id: wf-cve-2018-7600
     set: cve
@@ -101,6 +117,11 @@ rules:
       registration form runs a command. The rule matches a parameter name, in the query or a
       form, with `#post_render`, `#pre_render`, `#lazy_builder`, `#access_callback` or `#markup`.
       Browsers never send `#` in a form field's name (Drupal's own forms do not either).
+    examples:
+      hit:
+        - { uri: "/user/register?mail%5B%23markup%5D=x" }
+      pass:
+        - { uri: "/user/register?mail=a%40b.test&name=x" }
 
   - id: wf-cve-2018-13379
     set: cve
@@ -124,6 +145,11 @@ rules:
       matches the `lang` parameter naming the configuration database (`/dev/cmdb/`) or the
       session file. A language code never looks like this; the traversal itself is also scored
       by the traversal set.
+    examples:
+      hit:
+        - { uri: "/remote/fgt_lang?lang=/../../../..//////////dev/cmdb/sslvpn_websession" }
+      pass:
+        - { uri: "/remote/fgt_lang?lang=en" }
 
   - id: wf-cve-2018-20062
     set: cve
@@ -148,6 +174,11 @@ rules:
       to any public method of any class, which runs a command. The rule matches
       `think\app/invokefunction` or `think\container/invokefunction` in a parameter or the path,
       a controller path no honest link has.
+    examples:
+      hit:
+        - { uri: "/index.php?s=index/%5Cthink%5Capp/invokefunction" }
+      pass:
+        - { uri: "/index.php?s=index/index/hello" }
 
   - id: wf-cve-2019-19781
     set: cve
@@ -171,6 +202,11 @@ rules:
       a template that runs commands when it is fetched. The rule matches `../vpns/` in the path
       as sent, after percent-decoding; a client normalizes `..` before sending, so only a crafted
       request has it.
+    examples:
+      hit:
+        - { uri: "/vpn/../vpns/cfg/smb.conf" }
+      pass:
+        - { uri: "/vpns/portal/index.html" }
 
   - id: wf-cve-2020-5902
     set: cve
@@ -194,6 +230,11 @@ rules:
       `../`, so `/tmui/login.jsp/..;/tmui/locallb/workspace/fileRead.jsp?fileName=/etc/passwd`
       reaches pages behind the login and runs commands. The rule matches `..;` after `/tmui/` in
       the path. The traversal set's wf-930-100 also scores `..;/` anywhere.
+    examples:
+      hit:
+        - { uri: "/tmui/login.jsp/..;/tmui/locallb/workspace/fileRead.jsp" }
+      pass:
+        - { uri: "/tmui/login.jsp" }
 
   - id: wf-cve-2021-34473
     set: cve
@@ -219,6 +260,11 @@ rules:
       reaches the backend as SYSTEM (ProxyShell, chained to remote code execution;
       ProxyNotShell, 2022, the same request with `PowerShell` as the protocol). The rule matches
       `autodiscover.json?@` in a parameter value, after decoding: no mail client sends it.
+    examples:
+      hit:
+        - { uri: "/autodiscover/autodiscover.json?@x.test/owa/&Email=autodiscover/autodiscover.json%3F@x.test" }
+      pass:
+        - { uri: "/autodiscover/autodiscover.xml" }
 
   - id: wf-cve-2021-41773
     set: cve
@@ -243,6 +289,11 @@ rules:
       `/icons/.%2e/%2e%2e/%2e%2e/etc/passwd` reads files. The rule matches a segment of two dots
       of which at least one is `%2e`, in the path as sent. Clients do not percent-encode a dot,
       an unreserved character; the false-positive risk is negligible.
+    examples:
+      hit:
+        - { uri: "/icons/.%2e/%2e%2e/x" }
+      pass:
+        - { uri: "/icons/apache_pb.png" }
 
   - id: wf-cve-2021-42013
     set: cve
@@ -265,6 +316,11 @@ rules:
       encoding the escape itself: `%%32%65` (and `%%32e`, `%2%65`) becomes `%2e`, then `.`, as in
       `/cgi-bin/.%%32%65/.%%32%65/bin/sh`. The rule matches those sequences in the path as sent,
       which are not even valid percent-encoding: no client produces them.
+    examples:
+      hit:
+        - { uri: "/icons/.%%32%65/x" }
+      pass:
+        - { uri: "/icons/apache_pb.png" }
 
   - id: wf-cve-2022-1388
     set: cve
@@ -288,6 +344,11 @@ rules:
       as root. The rule matches the command endpoint's path, which is the target of both
       exploits. The management interface should never be behind a public site; one that does
       proxy it for its administrators excludes the rule on `/mgmt/*`.
+    examples:
+      hit:
+        - { uri: "/mgmt/tm/util/bash" }
+      pass:
+        - { uri: "/mgmt/shared/echo" }
 
   - id: wf-cve-2022-22963
     set: cve
@@ -312,6 +373,11 @@ rules:
       `/functionRouter`. The rule matches the header's presence: routing by a client-sent
       expression is what the fix took away, and a client of an application that still relies on
       it is excluded by path.
+    examples:
+      hit:
+        - { uri: "/functionRouter", headers: { spring.cloud.function.routing-expression: "T(java.lang.String)" } }
+      pass:
+        - { uri: "/functionRouter", headers: { content-type: "text/plain" } }
 
   - id: wf-cve-2022-22965
     set: cve
@@ -337,6 +403,11 @@ rules:
       (`class.module.classLoader.resources.context.parent.pipeline.first.pattern=...`). The rule
       matches a parameter name, in the query or a form, with `class.module.classLoader`; no form
       field is named so.
+    examples:
+      hit:
+        - { uri: "/app?class.module.classLoader.URLs%5B0%5D=0" }
+      pass:
+        - { uri: "/app?class=premium&module=a" }
 
   - id: wf-cve-2022-26134
     set: cve
@@ -362,6 +433,11 @@ rules:
       runs a command. The rule matches `${` followed by `(`, `@` or `#` in the decoded path.
       A front end that requests an unfilled template literally (`/user/${id}`) has no `(`, `@` or
       `#` there and is not matched.
+    examples:
+      hit:
+        - { uri: "/%24%7B%40java.lang.String%40valueOf(1)%7D/" }
+      pass:
+        - { uri: "/wiki/spaces/DOC/overview" }
 
   - id: wf-cve-2022-42889
     set: cve
@@ -385,6 +461,11 @@ rules:
       (`${script:javascript:java.lang.Runtime.getRuntime().exec('id')}`), `dns` and `url` reach
       out. The rule matches the three lookups in a parameter, a cookie, a header or the body.
       Template syntax of this form is not in honest values.
+    examples:
+      hit:
+        - { uri: "/search?q=%24%7Bdns:x.test%7D" }
+      pass:
+        - { uri: "/search?q=price+%245+dns+url" }
 
   - id: wf-cve-2023-46805
     set: cve
@@ -408,6 +489,11 @@ rules:
       API (CVE-2023-46805), where `/api/v1/license/keys-status/;command` injects a command
       (CVE-2024-21887); the two were chained in mass exploitation in 2024. The rule matches the
       traversal out of the backup-code prefix in the path as sent.
+    examples:
+      hit:
+        - { uri: "/api/v1/totp/user-backup-code/../../system/system-information" }
+      pass:
+        - { uri: "/api/v1/totp/user-backup-code" }
 
   - id: wf-cve-2024-3400
     set: cve
@@ -431,6 +517,11 @@ rules:
       and a name with a command in backticks creates a file whose name the telemetry job runs.
       The rule matches `../`, a backtick, `$(` or `${IFS}` in a cookie named `SESSID`; a session
       id is hex or base64.
+    examples:
+      hit:
+        - { uri: "/global-protect/login.esp", headers: { cookie: "SESSID=../../../x" } }
+      pass:
+        - { uri: "/global-protect/login.esp", headers: { cookie: "SESSID=a1b2c3d4" } }
 
   - id: wf-cve-2024-4577
     set: cve
@@ -457,6 +548,11 @@ rules:
       (CVE-2024-4577, PHP before 8.1.29, 8.2.20, 8.3.8). `?%ADd+allow_url_include%3d1+%ADd+auto_prepend_file%3dphp://input`
       then runs the body as PHP. The rule matches `-d` or `%ADd` followed by one of the ini
       directives these exploits set, in the query as sent.
+    examples:
+      hit:
+        - { uri: "/index.php?%ADd+allow_url_include%3d1" }
+      pass:
+        - { uri: "/index.php?d=1&mode=-d" }
 
   - id: wf-cve-2024-36401
     set: cve
@@ -480,6 +576,11 @@ rules:
       `valueReference=exec(java.lang.Runtime.getRuntime(),'id')` runs a command, in a GET's
       query or a POSTed XML request. The rule matches `exec(java.lang.Runtime` in a parameter or
       the body; a feature property is never called so.
+    examples:
+      hit:
+        - { uri: "/geoserver/wfs?valueReference=exec(java.lang.Runtime" }
+      pass:
+        - { uri: "/geoserver/wfs?valueReference=the_geom" }
 
   - id: wf-cve-2025-29927
     set: cve
@@ -502,3 +603,8 @@ rules:
       (`x-middleware-subrequest: middleware:middleware:middleware:middleware:middleware`). The
       rule matches the header's presence: Next.js sets it on its own internal requests, never a
       browser, and those do not pass through the proxy in front.
+    examples:
+      hit:
+        - { uri: "/dashboard", headers: { x-middleware-subrequest: "middleware" } }
+      pass:
+        - { uri: "/dashboard", headers: { x-middleware-prefetch: "1" } }

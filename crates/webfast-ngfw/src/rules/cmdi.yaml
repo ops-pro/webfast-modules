@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=../../../../docs/ngfw-rules.schema.json
 doc: |
   Set `cmdi` (wf-932-*): operating system command injection. A shell metacharacter followed by a
   command name, the shells and interpreters by path, a newline followed by a command.

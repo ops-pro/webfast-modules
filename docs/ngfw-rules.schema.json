@@ -1,0 +1,909 @@
+{
+  "$id": "https://github.com/ops-pro/webfast-modules/blob/main/docs/ngfw-rules.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "webfast-ngfw rules file",
+  "description": "A rules file: its description (`doc`, for docs/ngfw-rules.md), `rules:` and its list.",
+  "type": "object",
+  "properties": {
+    "doc": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Rule"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "Action": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "score",
+            "block",
+            "log",
+            "ban",
+            "pass",
+            "header"
+          ]
+        },
+        {
+          "description": "Refuses with the browser challenge (docs/challenge.md) unless the client passed it; needs\nthe `challenge` feature.",
+          "type": "string",
+          "const": "challenge"
+        }
+      ]
+    },
+    "Asn": {
+      "description": "An autonomous system: its number, or `AS` and its number.",
+      "anyOf": [
+        {
+          "type": "integer",
+          "maximum": 4294967295,
+          "minimum": 0
+        },
+        {
+          "type": "string",
+          "pattern": "^AS[0-9]+$"
+        }
+      ]
+    },
+    "Confidence": {
+      "description": "How rare a rule's false positives are: the axis next to `severity` (what a hit means).",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "medium"
+          ]
+        },
+        {
+          "description": "An honest client practically never sends what the rule matches.",
+          "type": "string",
+          "const": "high"
+        },
+        {
+          "description": "A signal to add up with others rather than a verdict.",
+          "type": "string",
+          "const": "low"
+        }
+      ]
+    },
+    "Example": {
+      "description": "One example: a value, put where the rule looks (each of its targets that has a place in a\nrequest: a query parameter, a cookie, a header, the path, a form or JSON body), or a request\nwritten out whole, for what a value alone does not say (a path, a method, a missing header, a\nresponse from the backend).",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/$defs/ExampleRequest"
+        }
+      ]
+    },
+    "ExampleRequest": {
+      "description": "A request written out: sent as it is, the `host` added when it has none (no User-Agent nor\nAccept are added: an example of a rule on their absence needs them absent).",
+      "type": "object",
+      "properties": {
+        "body": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "headers": {
+          "description": "Names as given, lowercase by convention.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "method": {
+          "type": "string",
+          "default": "GET"
+        },
+        "raw": {
+          "description": "The request's bytes, sent as they are on a connection of their own (`\\r\\n` line ends\nwritten out), for what the fields above cannot say: another HTTP version, no Host, a\nheader twice, a byte the HTTP parser may refuse. With it, none of the fields above. An\nHTTP/1.1 one ends its head with `Connection: close`, so the server closes after answering.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "response": {
+          "description": "What the backend answers, for a rule of the `response` phase: sent to the backend's\n`/reflect` (albedo's), which answers with it.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExampleResponse"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "description": "The status the server must answer: for a request refused before the filter sees it (the\nHTTP parser's 400), with the example in `pass`.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        "uri": {
+          "description": "The request target as sent: percent-encoded where it has to be.",
+          "type": "string",
+          "default": "/"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ExampleResponse": {
+      "description": "A backend's answer for a `response` example.",
+      "type": "object",
+      "properties": {
+        "body": {
+          "type": "string",
+          "default": ""
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "status": {
+          "type": "integer",
+          "format": "uint16",
+          "default": 200,
+          "maximum": 65535,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "Examples": {
+      "description": "A rule's examples: what it must match and what it must let be.",
+      "type": "object",
+      "properties": {
+        "hit": {
+          "description": "Each one makes the rule match.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Example"
+          }
+        },
+        "pass": {
+          "description": "None makes the rule match: the near misses, the honest look-alikes.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Example"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "Mode": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "block",
+            "log_only"
+          ]
+        },
+        {
+          "description": "Every refusal by rule is the browser challenge instead (docs/challenge.md); needs the\n`challenge` feature.",
+          "type": "string",
+          "const": "challenge"
+        }
+      ]
+    },
+    "Operator": {
+      "description": "The one test of a rule (docs/ngfw.md \"Operators\").",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "not_valid_utf8",
+            "not_valid_json",
+            "exists",
+            "missing"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contains_any": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "contains_any"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "equals_any": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "equals_any"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "starts_with_any": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "starts_with_any"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "ends_with_any": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "ends_with_any"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "regex": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "regex"
+          ]
+        },
+        {
+          "description": "The length in bytes of each value against a number.",
+          "type": "object",
+          "properties": {
+            "length_gt": {
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "length_gt"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "length_ge": {
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "length_ge"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "length_lt": {
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "length_lt"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "length_le": {
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "length_le"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "length_eq": {
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "length_eq"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "length_ne": {
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "length_ne"
+          ]
+        },
+        {
+          "description": "The number of the target's values against a number.",
+          "type": "object",
+          "properties": {
+            "count_gt": {
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "count_gt"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "count_ge": {
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "count_ge"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "count_lt": {
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "count_lt"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "count_le": {
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "count_le"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "count_eq": {
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "count_eq"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "count_ne": {
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "count_ne"
+          ]
+        },
+        {
+          "description": "A numeric target (`Target::is_numeric`) against a number.",
+          "type": "object",
+          "properties": {
+            "gt": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "gt"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "ge": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "ge"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "lt": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "lt"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "le": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "le"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "eq": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "eq"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "ne": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "ne"
+          ]
+        },
+        {
+          "description": "A file of one literal per line, relative to the rules file.",
+          "type": "object",
+          "properties": {
+            "in_set": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "in_set"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "ip_in": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "ip_in"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "country_in": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "country_in"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "asn_in": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Asn"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "asn_in"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "magic_not": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "magic_not"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "magic_is": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "magic_is"
+          ]
+        },
+        {
+          "description": "libinjection's SQL injection detector on each value (src/detect.rs); needs the\n`libinjection` feature.",
+          "type": "string",
+          "const": "detect_sqli"
+        },
+        {
+          "description": "libinjection's XSS detector on each value; needs the `libinjection` feature.",
+          "type": "string",
+          "const": "detect_xss"
+        }
+      ]
+    },
+    "Phase": {
+      "type": "string",
+      "enum": [
+        "connection",
+        "head",
+        "body",
+        "upload",
+        "response"
+      ]
+    },
+    "Refs": {
+      "description": "What a rule refers to: weaknesses (CWE), attack patterns (CAPEC), the OWASP Core Rule Set's\nrules it corresponds to (CRS ids, numbers), vulnerabilities (CVE), advisories (URLs).",
+      "type": "object",
+      "properties": {
+        "capec": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "crs": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "cve": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "cwe": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "urls": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "Rule": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/Action"
+        },
+        "confidence": {
+          "description": "How rare false positives are (`high`, `medium`, `low`); a rule without one is `medium`.\nWritten in the log; no other effect yet.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Confidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "doc": {
+          "description": "What the rule catches, why its score, where false positives come from, how to exclude\nit: for docs/ngfw-rules.md, not used by the server.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "examples": {
+          "description": "Requests the rule must match (`hit`) and must not match (`pass`): its tests, run in\nprocess and, written as go-ftw files, against a binary; not used by the server.",
+          "$ref": "#/$defs/Examples"
+        },
+        "header": {
+          "description": "With `action: header`: added to the request going on.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "id": {
+          "type": "string"
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Mode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "msg": {
+          "description": "Defaults to the id.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "operator": {
+          "$ref": "#/$defs/Operator"
+        },
+        "phase": {
+          "$ref": "#/$defs/Phase"
+        },
+        "prefilter": {
+          "description": "Literals one of which must occur before a `regex` runs.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "refs": {
+          "description": "CWE, CAPEC, CRS, CVE ids and advisory URLs (checked at load, `Refs::check`).",
+          "$ref": "#/$defs/Refs"
+        },
+        "score": {
+          "description": "Explicit; else the severity's.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "set": {
+          "description": "The set it belongs to; a site's rule without one is in `site`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "severity": {
+          "$ref": "#/$defs/Severity"
+        },
+        "tags": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Target"
+          }
+        },
+        "transform": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Transform"
+          }
+        },
+        "unless": {
+          "description": "Does not run if one of these matched.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "when": {
+          "description": "Runs only if these rules matched earlier in this request.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "phase",
+        "operator"
+      ]
+    },
+    "Severity": {
+      "type": "string",
+      "enum": [
+        "critical",
+        "high",
+        "medium",
+        "low",
+        "notice"
+      ]
+    },
+    "Target": {
+      "description": "What the rule looks at (docs/ngfw.md \"Targets\"): a fixed name, or a named parameter, header, cookie, response header, or a JSON pointer into the body.",
+      "anyOf": [
+        {
+          "enum": [
+            "method",
+            "version",
+            "path",
+            "path_raw",
+            "query",
+            "args",
+            "args_names",
+            "args_count",
+            "headers",
+            "headers_names",
+            "cookies",
+            "cookies_names",
+            "ua",
+            "host",
+            "client_ip",
+            "country",
+            "asn",
+            "body",
+            "body.json",
+            "upload.filename",
+            "upload.ext",
+            "upload.type",
+            "upload.head",
+            "upload.count",
+            "tls.sni",
+            "response.status",
+            "response.body",
+            "anomaly.double_encoding",
+            "anomaly.json_depth",
+            "anomaly.duplicate_content_length",
+            "anomaly.http10_without_host",
+            "anomaly.post_without_content_type",
+            "anomaly.body_type_mismatch"
+          ]
+        },
+        {
+          "type": "string",
+          "pattern": "^(args|headers|cookies|response\\.headers)\\..+$"
+        },
+        {
+          "type": "string",
+          "pattern": "^body\\.json/.*$"
+        }
+      ]
+    },
+    "Transform": {
+      "type": "string",
+      "enum": [
+        "url_decode",
+        "html_decode",
+        "lowercase",
+        "normalize_path",
+        "remove_nulls",
+        "compress_whitespace",
+        "remove_comments",
+        "base64_decode",
+        "js_decode",
+        "cmd_line",
+        "utf8_to_unicode"
+      ]
+    }
+  }
+}

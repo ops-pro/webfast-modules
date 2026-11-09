@@ -1,0 +1,39 @@
+# Written by src/ftw.rs from its source (a rule's `examples`, a list of tests/corpus/): edit
+# that, then `UPDATE_FTW_TESTS=1 cargo test -p webfast-ngfw --lib ftw`.
+meta:
+  author: "webfast"
+  description: "Text4Shell: Apache Commons Text script, dns or url lookup (CVE-2022-42889)"
+  enabled: true
+  name: "wf-cve-2022-42889"
+rule_id: 20220042889
+tests:
+  - test_id: 1
+    desc: "wf-cve-2022-42889 matches"
+    stages:
+      - description: "request"
+        input:
+          dest_addr: "127.0.0.1"
+          port: 80
+          method: "GET"
+          uri: "/search?q=%24%7Bdns:x.test%7D"
+          version: "HTTP/1.1"
+          headers:
+            "host": "www.example.com"
+        output:
+          log:
+            expect_ids: [20220042889]
+  - test_id: 2
+    desc: "wf-cve-2022-42889 lets it be"
+    stages:
+      - description: "request"
+        input:
+          dest_addr: "127.0.0.1"
+          port: 80
+          method: "GET"
+          uri: "/search?q=price+%245+dns+url"
+          version: "HTTP/1.1"
+          headers:
+            "host": "www.example.com"
+        output:
+          log:
+            no_expect_ids: [20220042889]

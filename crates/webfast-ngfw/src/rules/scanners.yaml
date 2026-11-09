@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=../../../../docs/ngfw-rules.schema.json
 doc: |
   Set `scanners` (wf-913-*): the tools and the probes. User-Agents of vulnerability scanners and
   brute-forcers, the paths they try everywhere (dot-files, version control, WordPress, admin

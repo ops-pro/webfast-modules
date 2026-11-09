@@ -1,0 +1,39 @@
+# Written by src/ftw.rs from its source (a rule's `examples`, a list of tests/corpus/): edit
+# that, then `UPDATE_FTW_TESTS=1 cargo test -p webfast-ngfw --lib ftw`.
+meta:
+  author: "webfast"
+  description: "F5 BIG-IP TMUI path traversal (..;/ after /tmui/) (CVE-2020-5902)"
+  enabled: true
+  name: "wf-cve-2020-5902"
+rule_id: 20200005902
+tests:
+  - test_id: 1
+    desc: "wf-cve-2020-5902 matches"
+    stages:
+      - description: "request"
+        input:
+          dest_addr: "127.0.0.1"
+          port: 80
+          method: "GET"
+          uri: "/tmui/login.jsp/..;/tmui/locallb/workspace/fileRead.jsp"
+          version: "HTTP/1.1"
+          headers:
+            "host": "www.example.com"
+        output:
+          log:
+            expect_ids: [20200005902]
+  - test_id: 2
+    desc: "wf-cve-2020-5902 lets it be"
+    stages:
+      - description: "request"
+        input:
+          dest_addr: "127.0.0.1"
+          port: 80
+          method: "GET"
+          uri: "/tmui/login.jsp"
+          version: "HTTP/1.1"
+          headers:
+            "host": "www.example.com"
+        output:
+          log:
+            no_expect_ids: [20200005902]

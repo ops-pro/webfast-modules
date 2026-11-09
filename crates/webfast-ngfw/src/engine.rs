@@ -2531,141 +2531,6 @@ rules:
         assert!(!buffers.query_plus && buffers.query_text.is_empty());
     }
 
-    /// The `cve` set's rules: each refuses the request shape of its CVE (the marker its signature
-    /// looks for, not a working exploit) and lets a close, ordinary request of the same product
-    /// through.
-    #[test]
-    fn each_cve_rule_takes_its_signature_and_not_its_neighbour() {
-        // The set alone: in `builtin: all` an earlier `block` (a scanner's probe of the same path)
-        // may end the request before the set is reached.
-        let config: super::super::config::RulesConfig = webfast_core::yaml::from_str("builtin: [cve]\n").unwrap();
-        let (rules, _) = super::super::config::compose(&config, Path::new(".")).unwrap();
-        let c = compile(&rules, Mode::Block, &[]).unwrap();
-        let cve_hits = |uri: &str, headers: &[(&str, &str)]| -> Vec<String> {
-            let parts = request(uri, headers);
-            let input = input(&parts);
-            let mut eval = Evaluation::new();
-            eval.run_phase(&c, Phase::Head, &input, 200);
-            ids(&c, &eval)
-                .into_iter()
-                .filter(|id| id.starts_with("wf-cve-"))
-                .collect()
-        };
-        type Case<'a> = (&'a str, &'a str, &'a [(&'a str, &'a str)]);
-        // (rule, the request it takes, its headers)
-        let takes: &[Case] = &[
-            ("wf-cve-2014-6271", "/cgi-bin/status", &[("user-agent", "() { :; };")]),
-            (
-                "wf-cve-2017-5638",
-                "/upload.action",
-                &[("content-type", "%{#context}.multipart/form-data")],
-            ),
-            (
-                "wf-cve-2017-9841",
-                "/vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php",
-                &[],
-            ),
-            ("wf-cve-2018-7600", "/user/register?mail%5B%23markup%5D=x", &[]),
-            (
-                "wf-cve-2018-13379",
-                "/remote/fgt_lang?lang=/../../../..//////////dev/cmdb/sslvpn_websession",
-                &[],
-            ),
-            (
-                "wf-cve-2018-20062",
-                "/index.php?s=index/%5Cthink%5Capp/invokefunction",
-                &[],
-            ),
-            ("wf-cve-2019-19781", "/vpn/../vpns/cfg/smb.conf", &[]),
-            (
-                "wf-cve-2020-5902",
-                "/tmui/login.jsp/..;/tmui/locallb/workspace/fileRead.jsp",
-                &[],
-            ),
-            (
-                "wf-cve-2021-34473",
-                "/autodiscover/autodiscover.json?@x.test/owa/&Email=autodiscover/autodiscover.json%3F@x.test",
-                &[],
-            ),
-            ("wf-cve-2021-41773", "/icons/.%2e/%2e%2e/x", &[]),
-            ("wf-cve-2021-42013", "/icons/.%%32%65/x", &[]),
-            ("wf-cve-2022-1388", "/mgmt/tm/util/bash", &[]),
-            (
-                "wf-cve-2022-22963",
-                "/functionRouter",
-                &[("spring.cloud.function.routing-expression", "T(java.lang.String)")],
-            ),
-            ("wf-cve-2022-22965", "/app?class.module.classLoader.URLs%5B0%5D=0", &[]),
-            ("wf-cve-2022-26134", "/%24%7B%40java.lang.String%40valueOf(1)%7D/", &[]),
-            ("wf-cve-2022-42889", "/search?q=%24%7Bdns:x.test%7D", &[]),
-            (
-                "wf-cve-2023-46805",
-                "/api/v1/totp/user-backup-code/../../system/system-information",
-                &[],
-            ),
-            (
-                "wf-cve-2024-3400",
-                "/global-protect/login.esp",
-                &[("cookie", "SESSID=../../../x")],
-            ),
-            ("wf-cve-2024-4577", "/index.php?%ADd+allow_url_include%3d1", &[]),
-            (
-                "wf-cve-2024-36401",
-                "/geoserver/wfs?valueReference=exec(java.lang.Runtime",
-                &[],
-            ),
-            (
-                "wf-cve-2025-29927",
-                "/dashboard",
-                &[("x-middleware-subrequest", "middleware")],
-            ),
-        ];
-        let mut ruled: Vec<&str> = c
-            .rules
-            .iter()
-            .map(|r| r.id.as_str())
-            .filter(|id| id.starts_with("wf-cve-"))
-            .collect();
-        ruled.sort_unstable();
-        let mut tested: Vec<&str> = takes.iter().map(|(id, _, _)| *id).collect();
-        tested.sort_unstable();
-        assert_eq!(ruled, tested, "every cve rule has a case here");
-        for (id, uri, headers) in takes {
-            let hits = cve_hits(uri, headers);
-            assert!(hits.iter().any(|h| h == id), "{id} on {uri} {headers:?}: {hits:?}");
-        }
-        // Ordinary requests to the same products and paths.
-        let neighbours: &[(&str, &[(&str, &str)])] = &[
-            (
-                "/cgi-bin/status",
-                &[("user-agent", "Mozilla/5.0 (compatible; bot/1.0)")],
-            ),
-            ("/upload.action", &[("content-type", "multipart/form-data; boundary=x")]),
-            ("/vendor/phpunit/phpunit/README.md", &[]),
-            ("/user/register?mail=a%40b.test&name=x", &[]),
-            ("/remote/fgt_lang?lang=en", &[]),
-            ("/index.php?s=index/index/hello", &[]),
-            ("/vpns/portal/index.html", &[]),
-            ("/tmui/login.jsp", &[]),
-            ("/autodiscover/autodiscover.xml", &[]),
-            ("/icons/apache_pb.png", &[]),
-            ("/mgmt/shared/echo", &[]),
-            ("/functionRouter", &[("content-type", "text/plain")]),
-            ("/app?class=premium&module=a", &[]),
-            ("/wiki/spaces/DOC/overview", &[]),
-            ("/search?q=price+%245+dns+url", &[]),
-            ("/api/v1/totp/user-backup-code", &[]),
-            ("/global-protect/login.esp", &[("cookie", "SESSID=a1b2c3d4")]),
-            ("/index.php?d=1&mode=-d", &[]),
-            ("/geoserver/wfs?valueReference=the_geom", &[]),
-            ("/dashboard", &[("x-middleware-prefetch", "1")]),
-        ];
-        for (uri, headers) in neighbours {
-            let hits = cve_hits(uri, headers);
-            assert!(hits.is_empty(), "{uri} {headers:?}: {hits:?}");
-        }
-    }
-
     #[test]
     fn block_pass_header_missing_count_and_anomaly_actions() {
         let c = compiled(RULES, Mode::Block);
@@ -2945,7 +2810,7 @@ rules:
             assert!(ua.contains(&"wf-941-150".to_string()), "{ua:?}");
             let referer = hits_of(&c, "https://x.test/?q=%3Csvg%20onload%3Dalert(1)%3E", Some("referer"));
             assert!(referer.contains(&"wf-941-150".to_string()), "{referer:?}");
-            for value in BENIGN {
+            for value in BENIGN.iter() {
                 let hits = hits_of(&c, value, None);
                 assert!(
                     !hits.iter().any(|id| id == "wf-942-170" || id == "wf-941-150"),
@@ -2996,7 +2861,7 @@ rules:
         fn the_whole_filter_refuses_the_corpus_and_hits_no_benign_value() {
             let c = builtin();
             let mut passed = Vec::new();
-            for payload in SQLI.iter().chain(XSS).chain(BYPASS) {
+            for payload in SQLI.iter().chain(XSS.iter()).chain(BYPASS.iter()) {
                 for (place, score, hits) in evaluations(&c, payload) {
                     if score < 5 {
                         passed.push(format!("{place}: {payload:?} scored {score} {hits:?}"));
@@ -3005,7 +2870,7 @@ rules:
             }
             assert!(passed.is_empty(), "let through:\n{}", passed.join("\n"));
             let mut hit = Vec::new();
-            for value in BENIGN {
+            for value in BENIGN.iter() {
                 for (place, score, hits) in evaluations(&c, value) {
                     if !hits.is_empty() {
                         hit.push(format!("{place}: {value:?} scored {score} {hits:?}"));

@@ -8,7 +8,5 @@ testoverride:
     dest_addr: webfast
     port: 8080
   ignore:
-    # wf-913-220 (scanners' probes of well-known paths) refuses these before the cve set is reached.
+    # wf-913-220 (scanners' probes of well-known paths) refuses this before the cve set is reached.
     '^20170009841-1$': 'wf-913-220 refuses /vendor/phpunit/ first: the cve rule is checked in the cve pass'
-    '^999001-1$': 'wf-913-220 refuses /cgi-bin/ with every set on: a neighbour only for the cve set'
-    '^999001-3$': 'wf-913-220 refuses /vendor/phpunit/ with every set on: a neighbour only for the cve set'

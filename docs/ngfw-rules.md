@@ -98,6 +98,8 @@ another hit.
 - Severity `medium`, score 3, confidence `medium`, action `score`
 - Tags: `OWASP_A05`, `protocol`, `host`
 - References: [CWE-20](https://cwe.mitre.org/data/definitions/20.html), CRS 920280
+- Matches: raw `GET /p HTTP/1.0\x0d`
+- Does not match: raw `GET /p HTTP/1.0\x0d`
 
 An HTTP/1.0 request without Host: what simple scanners and scripts send, and what reaches
 the default site of a server by its address. Browsers have sent Host since the nineties.
@@ -116,6 +118,7 @@ probe is better given its own path and excluded there (or `disable: [wf-920-110]
 - Severity `high`, score 4, confidence `high`, action `score`
 - Tags: `OWASP_A05`, `protocol`, `encoding`
 - References: [CWE-20](https://cwe.mitre.org/data/definitions/20.html), CRS 920270, CRS 920271
+- Does not match: raw `GET /p HTTP/1.1\x0d`, answered 400, raw `GET /p HTTP/1.1\x0d`
 
 A raw control byte (other than tab, line feed and carriage return) in the path as sent or
 in a header value. No browser or HTTP library puts one there; they are used to confuse
@@ -206,6 +209,7 @@ with such names excludes on their paths.
 - Severity `critical`, score 5, confidence `high`, action `block`
 - Tags: `OWASP_A05`, `protocol`, `smuggling`
 - References: [CWE-444](https://cwe.mitre.org/data/definitions/444.html), [CAPEC-33](https://capec.mitre.org/data/definitions/33.html), CRS 920181
+- Does not match: raw `POST /p HTTP/1.1\x0d`, answered 200, raw `POST /p HTTP/1.1\x0d`, answered 200, raw `POST /p HTTP/1.1\x0d`
 
 Conflicting framing: two Content-Length fields, or Content-Length with Transfer-Encoding.
 This is how a request is smuggled past a proxy that reads one framing to a backend that
@@ -1789,6 +1793,8 @@ OWASP: A06 Vulnerable and Outdated Components.
 - Severity `critical`, score 5, confidence `high`, action `block`
 - Tags: `OWASP_A06`, `cve`, `bash`
 - References: [CVE-2014-6271](https://nvd.nist.gov/vuln/detail/CVE-2014-6271), [CWE-78](https://cwe.mitre.org/data/definitions/78.html), [CAPEC-88](https://capec.mitre.org/data/definitions/88.html), CRS 932170, CRS 932171, <https://nvd.nist.gov/vuln/detail/CVE-2014-6271>
+- Matches: `GET /cgi-bin/status` with `user-agent: () { :; };`
+- Does not match: `GET /cgi-bin/status` with `user-agent: Mozilla/5.0 (compatible; bot/1.0)`
 
 Shellshock: bash before 4.3 patch 25 runs what follows a function definition in an
 environment variable, and CGI passes every header (and the query) to the script as one.
@@ -1808,6 +1814,8 @@ form sends that; the risk of a false positive is negligible.
 - Severity `critical`, score 5, confidence `high`, action `block`
 - Tags: `OWASP_A06`, `cve`, `struts`
 - References: [CVE-2017-5638](https://nvd.nist.gov/vuln/detail/CVE-2017-5638), [CWE-20](https://cwe.mitre.org/data/definitions/20.html), [CWE-917](https://cwe.mitre.org/data/definitions/917.html), [CAPEC-242](https://capec.mitre.org/data/definitions/242.html), <https://cwiki.apache.org/confluence/display/WW/S2-045>
+- Matches: `GET /upload.action` with `content-type: %{#context}.multipart/form-data`
+- Does not match: `GET /upload.action` with `content-type: multipart/form-data; boundary=x`
 
 Apache Struts 2 (2.3.5 to 2.3.31, 2.5 to 2.5.10), the Jakarta multipart parser: an invalid
 Content-Type is put into an error message that is evaluated as OGNL, so
@@ -1826,6 +1834,8 @@ rule matches `%{` or `${` in the Content-Type, which no media type has.
 - Severity `critical`, score 5, confidence `high`, action `block`
 - Tags: `OWASP_A06`, `cve`, `phpunit`
 - References: [CVE-2017-9841](https://nvd.nist.gov/vuln/detail/CVE-2017-9841), [CWE-94](https://cwe.mitre.org/data/definitions/94.html), [CAPEC-242](https://capec.mitre.org/data/definitions/242.html), <https://nvd.nist.gov/vuln/detail/CVE-2017-9841>
+- Matches: `GET /vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php`
+- Does not match: `GET /vendor/phpunit/phpunit/README.md`
 
 PHPUnit before 4.8.28 and 5.6.3 ships `src/Util/PHP/eval-stdin.php`, which evaluates the
 request body as PHP; a `vendor/` directory published with the site makes it a web shell,
@@ -1846,6 +1856,8 @@ purpose.
 - Severity `critical`, score 5, confidence `high`, action `block`
 - Tags: `OWASP_A06`, `cve`, `drupal`
 - References: [CVE-2018-7600](https://nvd.nist.gov/vuln/detail/CVE-2018-7600), [CWE-20](https://cwe.mitre.org/data/definitions/20.html), [CWE-94](https://cwe.mitre.org/data/definitions/94.html), [CAPEC-242](https://capec.mitre.org/data/definitions/242.html), <https://www.drupal.org/sa-core-2018-002>
+- Matches: `GET /user/register?mail%5B%23markup%5D=x`
+- Does not match: `GET /user/register?mail=a%40b.test&name=x`
 
 Drupal 7 before 7.58 and 8 before 8.5.1 merge request parameters into render arrays, whose
 keys starting with `#` are callbacks: `mail[#post_render][]=exec&mail[#markup]=id` on the
@@ -1865,6 +1877,8 @@ Browsers never send `#` in a form field's name (Drupal's own forms do not either
 - Severity `critical`, score 5, confidence `high`, action `block`
 - Tags: `OWASP_A06`, `cve`, `fortios`
 - References: [CVE-2018-13379](https://nvd.nist.gov/vuln/detail/CVE-2018-13379), [CWE-22](https://cwe.mitre.org/data/definitions/22.html), [CAPEC-126](https://capec.mitre.org/data/definitions/126.html), <https://www.fortiguard.com/psirt/FG-IR-18-384>
+- Matches: `GET /remote/fgt_lang?lang=/../../../..//////////dev/cmdb/sslvpn_websession`
+- Does not match: `GET /remote/fgt_lang?lang=en`
 
 FortiOS SSL VPN 5.4 to 6.0.4: `/remote/fgt_lang?lang=/../../../..//////////dev/cmdb/sslvpn_websession`
 reads the file of active sessions, with user names and passwords in clear. The rule
@@ -1889,6 +1903,8 @@ by the traversal set.
 - Severity `critical`, score 5, confidence `high`, action `block`
 - Tags: `OWASP_A06`, `cve`, `thinkphp`
 - References: [CVE-2018-20062](https://nvd.nist.gov/vuln/detail/CVE-2018-20062), [CWE-94](https://cwe.mitre.org/data/definitions/94.html), [CAPEC-242](https://capec.mitre.org/data/definitions/242.html), <https://nvd.nist.gov/vuln/detail/CVE-2018-20062>
+- Matches: `GET /index.php?s=index/%5Cthink%5Capp/invokefunction`
+- Does not match: `GET /index.php?s=index/index/hello`
 
 ThinkPHP 5.0 before 5.0.23 and 5.1 before 5.1.31 (and applications built on them, such as
 NoneCMS) route `s=/index/\think\app/invokefunction&function=call_user_func_array&vars[0]=system&vars[1][]=id`
@@ -1908,6 +1924,8 @@ a controller path no honest link has.
 - Severity `critical`, score 5, confidence `high`, action `block`
 - Tags: `OWASP_A06`, `cve`, `citrix`
 - References: [CVE-2019-19781](https://nvd.nist.gov/vuln/detail/CVE-2019-19781), [CWE-22](https://cwe.mitre.org/data/definitions/22.html), [CAPEC-126](https://capec.mitre.org/data/definitions/126.html), <https://support.citrix.com/article/CTX267027>
+- Matches: `GET /vpn/../vpns/cfg/smb.conf`
+- Does not match: `GET /vpns/portal/index.html`
 
 Citrix ADC and Gateway (NetScaler) before the January 2020 fixes: `POST /vpn/../vpns/portal/scripts/newbm.pl`
 reaches a Perl script without authentication, and with an `NSC_USER` header of `../` writes
@@ -1932,6 +1950,8 @@ request has it.
 - Severity `critical`, score 5, confidence `high`, action `block`
 - Tags: `OWASP_A06`, `cve`, `f5`
 - References: [CVE-2020-5902](https://nvd.nist.gov/vuln/detail/CVE-2020-5902), [CWE-22](https://cwe.mitre.org/data/definitions/22.html), [CAPEC-126](https://capec.mitre.org/data/definitions/126.html), <https://my.f5.com/manage/s/article/K52145254>
+- Matches: `GET /tmui/login.jsp/..;/tmui/locallb/workspace/fileRead.jsp`
+- Does not match: `GET /tmui/login.jsp`
 
 F5 BIG-IP's Traffic Management User Interface (11.6 to 15.1.0): Tomcat reads `..;/` as
 `../`, so `/tmui/login.jsp/..;/tmui/locallb/workspace/fileRead.jsp?fileName=/etc/passwd`
@@ -1950,6 +1970,8 @@ the path. The traversal set's wf-930-100 also scores `..;/` anywhere.
 - Severity `critical`, score 5, confidence `high`, action `block`
 - Tags: `OWASP_A06`, `cve`, `exchange`
 - References: [CVE-2021-34473](https://nvd.nist.gov/vuln/detail/CVE-2021-34473), [CVE-2022-41040](https://nvd.nist.gov/vuln/detail/CVE-2022-41040), [CWE-918](https://cwe.mitre.org/data/definitions/918.html), [CAPEC-664](https://capec.mitre.org/data/definitions/664.html), <https://msrc.microsoft.com/update-guide/vulnerability/CVE-2021-34473>, <https://msrc.microsoft.com/update-guide/vulnerability/CVE-2022-41040>
+- Matches: `GET /autodiscover/autodiscover.json?@x.test/owa/&Email=autodiscover/autodiscover.json%3F@x.test`
+- Does not match: `GET /autodiscover/autodiscover.xml`
 
 Microsoft Exchange Server: the autodiscover endpoint takes an `Email` parameter of
 `autodiscover/autodiscover.json?@x.com` as a path to proxy to, so
@@ -1970,6 +1992,8 @@ ProxyNotShell, 2022, the same request with `PowerShell` as the protocol). The ru
 - Severity `critical`, score 5, confidence `high`, action `block`
 - Tags: `OWASP_A06`, `cve`, `apache`
 - References: [CVE-2021-41773](https://nvd.nist.gov/vuln/detail/CVE-2021-41773), [CWE-22](https://cwe.mitre.org/data/definitions/22.html), [CAPEC-126](https://capec.mitre.org/data/definitions/126.html), CRS 930100, <https://httpd.apache.org/security/vulnerabilities_24.html>
+- Matches: `GET /icons/.%2e/%2e%2e/x`
+- Does not match: `GET /icons/apache_pb.png`
 
 Apache HTTP Server 2.4.49 normalized the path before decoding it, so a dot segment with an
 encoded dot (`/.%2e/`) passed: `/cgi-bin/.%2e/.%2e/.%2e/bin/sh` runs a shell with CGI on,
@@ -1989,6 +2013,8 @@ an unreserved character; the false-positive risk is negligible.
 - Severity `critical`, score 5, confidence `high`, action `block`
 - Tags: `OWASP_A06`, `cve`, `apache`
 - References: [CVE-2021-42013](https://nvd.nist.gov/vuln/detail/CVE-2021-42013), [CWE-22](https://cwe.mitre.org/data/definitions/22.html), [CAPEC-126](https://capec.mitre.org/data/definitions/126.html), <https://httpd.apache.org/security/vulnerabilities_24.html>
+- Matches: `GET /icons/.%%32%65/x`
+- Does not match: `GET /icons/apache_pb.png`
 
 Apache HTTP Server 2.4.50's fix of CVE-2021-41773 decoded once more and was bypassed by
 encoding the escape itself: `%%32%65` (and `%%32e`, `%2%65`) becomes `%2e`, then `.`, as in
@@ -2007,6 +2033,8 @@ which are not even valid percent-encoding: no client produces them.
 - Severity `critical`, score 5, confidence `high`, action `block`
 - Tags: `OWASP_A06`, `cve`, `f5`
 - References: [CVE-2022-1388](https://nvd.nist.gov/vuln/detail/CVE-2022-1388), [CVE-2021-22986](https://nvd.nist.gov/vuln/detail/CVE-2021-22986), [CWE-306](https://cwe.mitre.org/data/definitions/306.html), <https://my.f5.com/manage/s/article/K23605346>
+- Matches: `GET /mgmt/tm/util/bash`
+- Does not match: `GET /mgmt/shared/echo`
 
 F5 BIG-IP iControl REST: a request with `Connection: X-F5-Auth-Token` and an empty token
 passes authentication (CVE-2022-1388; CVE-2021-22986 before it was another bypass) and
@@ -2027,6 +2055,8 @@ proxy it for its administrators excludes the rule on `/mgmt/*`.
 - Severity `critical`, score 5, confidence `high`, action `block`
 - Tags: `OWASP_A06`, `cve`, `spring`
 - References: [CVE-2022-22963](https://nvd.nist.gov/vuln/detail/CVE-2022-22963), [CWE-917](https://cwe.mitre.org/data/definitions/917.html), [CAPEC-242](https://capec.mitre.org/data/definitions/242.html), <https://spring.io/security/cve-2022-22963>
+- Matches: `GET /functionRouter` with `spring.cloud.function.routing-expression: T(java.lang.String)`
+- Does not match: `GET /functionRouter` with `content-type: text/plain`
 
 Spring Cloud Function 3.1.6, 3.2.2 and older evaluate the
 `spring.cloud.function.routing-expression` header as SpEL, so
@@ -2047,6 +2077,8 @@ it is excluded by path.
 - Severity `critical`, score 5, confidence `high`, action `block`
 - Tags: `OWASP_A06`, `cve`, `spring`
 - References: [CVE-2022-22965](https://nvd.nist.gov/vuln/detail/CVE-2022-22965), [CWE-94](https://cwe.mitre.org/data/definitions/94.html), [CAPEC-242](https://capec.mitre.org/data/definitions/242.html), CRS 944260, <https://spring.io/security/cve-2022-22965>
+- Matches: `GET /app?class.module.classLoader.URLs%5B0%5D=0`
+- Does not match: `GET /app?class=premium&module=a`
 
 Spring Framework 5.3.0 to 5.3.17 and 5.2.0 to 5.2.19 on JDK 9+: data binding follows
 `class.module.classLoader...` from a parameter name to Tomcat's access log valve, and the
@@ -2072,6 +2104,8 @@ field is named so.
 - Severity `critical`, score 5, confidence `high`, action `block`
 - Tags: `OWASP_A06`, `cve`, `confluence`
 - References: [CVE-2022-26134](https://nvd.nist.gov/vuln/detail/CVE-2022-26134), [CWE-917](https://cwe.mitre.org/data/definitions/917.html), [CAPEC-242](https://capec.mitre.org/data/definitions/242.html), <https://nvd.nist.gov/vuln/detail/CVE-2022-26134>
+- Matches: `GET /%24%7B%40java.lang.String%40valueOf(1)%7D/`
+- Does not match: `GET /wiki/spaces/DOC/overview`
 
 Atlassian Confluence Server and Data Center before 7.4.17, 7.13.7, 7.14.3, 7.15.2, 7.16.4,
 7.17.4 and 7.18.1 evaluate the namespace of a request path as OGNL without
@@ -2092,6 +2126,8 @@ A front end that requests an unfilled template literally (`/user/${id}`) has no 
 - Severity `critical`, score 5, confidence `high`, action `block`
 - Tags: `OWASP_A06`, `cve`, `commons-text`
 - References: [CVE-2022-42889](https://nvd.nist.gov/vuln/detail/CVE-2022-42889), [CWE-94](https://cwe.mitre.org/data/definitions/94.html), [CAPEC-242](https://capec.mitre.org/data/definitions/242.html), <https://nvd.nist.gov/vuln/detail/CVE-2022-42889>
+- Matches: `GET /search?q=%24%7Bdns:x.test%7D`
+- Does not match: `GET /search?q=price+%245+dns+url`
 
 Apache Commons Text 1.5 to 1.9 interpolate `${prefix:...}` in strings passed to
 `StringSubstitutor`, and the `script` lookup runs JavaScript
@@ -2111,6 +2147,8 @@ Template syntax of this form is not in honest values.
 - Severity `critical`, score 5, confidence `high`, action `block`
 - Tags: `OWASP_A06`, `cve`, `ivanti`
 - References: [CVE-2023-46805](https://nvd.nist.gov/vuln/detail/CVE-2023-46805), [CVE-2024-21887](https://nvd.nist.gov/vuln/detail/CVE-2024-21887), [CWE-287](https://cwe.mitre.org/data/definitions/287.html), [CWE-77](https://cwe.mitre.org/data/definitions/77.html), [CAPEC-126](https://capec.mitre.org/data/definitions/126.html), <https://nvd.nist.gov/vuln/detail/CVE-2023-46805>, <https://nvd.nist.gov/vuln/detail/CVE-2024-21887>
+- Matches: `GET /api/v1/totp/user-backup-code/../../system/system-information`
+- Does not match: `GET /api/v1/totp/user-backup-code`
 
 Ivanti Connect Secure and Policy Secure 9.x and 22.x: the unauthenticated
 `/api/v1/totp/user-backup-code/` prefix followed by `../` reaches the authenticated REST
@@ -2130,6 +2168,8 @@ traversal out of the backup-code prefix in the path as sent.
 - Severity `critical`, score 5, confidence `high`, action `block`
 - Tags: `OWASP_A06`, `cve`, `panos`
 - References: [CVE-2024-3400](https://nvd.nist.gov/vuln/detail/CVE-2024-3400), [CWE-77](https://cwe.mitre.org/data/definitions/77.html), [CWE-22](https://cwe.mitre.org/data/definitions/22.html), [CAPEC-88](https://capec.mitre.org/data/definitions/88.html), <https://security.paloaltonetworks.com/CVE-2024-3400>
+- Matches: `GET /global-protect/login.esp` with `cookie: SESSID=../../../x`
+- Does not match: `GET /global-protect/login.esp` with `cookie: SESSID=a1b2c3d4`
 
 Palo Alto Networks PAN-OS 10.2, 11.0 and 11.1 with GlobalProtect: the `SESSID` cookie is
 used as a file name, so a `SESSID` of `/../../../opt/panlogs/tmp/device_telemetry/minute/`
@@ -2154,6 +2194,8 @@ id is hex or base64.
 - Severity `critical`, score 5, confidence `high`, action `block`
 - Tags: `OWASP_A06`, `cve`, `php`
 - References: [CVE-2024-4577](https://nvd.nist.gov/vuln/detail/CVE-2024-4577), [CVE-2012-1823](https://nvd.nist.gov/vuln/detail/CVE-2012-1823), [CWE-78](https://cwe.mitre.org/data/definitions/78.html), [CAPEC-88](https://capec.mitre.org/data/definitions/88.html), <https://nvd.nist.gov/vuln/detail/CVE-2024-4577>
+- Matches: `GET /index.php?%ADd+allow_url_include%3d1`
+- Does not match: `GET /index.php?d=1&mode=-d`
 
 PHP in CGI mode takes a query without `=` as command-line arguments (CVE-2012-1823); on
 Windows with some code pages a soft hyphen (`%AD`) is read as `-`, past the fix
@@ -2173,6 +2215,8 @@ directives these exploits set, in the query as sent.
 - Severity `critical`, score 5, confidence `high`, action `block`
 - Tags: `OWASP_A06`, `cve`, `geoserver`
 - References: [CVE-2024-36401](https://nvd.nist.gov/vuln/detail/CVE-2024-36401), [CWE-95](https://cwe.mitre.org/data/definitions/95.html), [CAPEC-242](https://capec.mitre.org/data/definitions/242.html), <https://nvd.nist.gov/vuln/detail/CVE-2024-36401>
+- Matches: `GET /geoserver/wfs?valueReference=exec(java.lang.Runtime`
+- Does not match: `GET /geoserver/wfs?valueReference=the_geom`
 
 GeoServer before 2.23.6, 2.24.4 and 2.25.2 evaluates the property names of OGC requests
 (WFS `valueReference`, `propertyName`) as XPath through commons-jxpath, which calls Java:
@@ -2192,6 +2236,8 @@ the body; a feature property is never called so.
 - Severity `critical`, score 5, confidence `high`, action `block`
 - Tags: `OWASP_A06`, `cve`, `nextjs`
 - References: [CVE-2025-29927](https://nvd.nist.gov/vuln/detail/CVE-2025-29927), [CWE-285](https://cwe.mitre.org/data/definitions/285.html), <https://nvd.nist.gov/vuln/detail/CVE-2025-29927>
+- Matches: `GET /dashboard` with `x-middleware-subrequest: middleware`
+- Does not match: `GET /dashboard` with `x-middleware-prefetch: 1`
 
 Next.js before 12.3.5, 13.5.9, 14.2.25 and 15.2.3 skips its middleware, where many sites
 check authentication, for a request with the internal `x-middleware-subrequest` header

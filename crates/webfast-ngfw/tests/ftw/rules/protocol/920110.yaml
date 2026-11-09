@@ -1,0 +1,31 @@
+# Written by src/ftw.rs from its source (a rule's `examples`, a list of tests/corpus/): edit
+# that, then `UPDATE_FTW_TESTS=1 cargo test -p webfast-ngfw --lib ftw`.
+meta:
+  author: "webfast"
+  description: "HTTP/1.0 request without a Host header"
+  enabled: true
+  name: "wf-920-110"
+rule_id: 920110
+tests:
+  - test_id: 1
+    desc: "wf-920-110 matches"
+    stages:
+      - description: "raw request"
+        input:
+          dest_addr: "127.0.0.1"
+          port: 80
+          encoded_request: "R0VUIC9wIEhUVFAvMS4wDQpVc2VyLUFnZW50OiBNb3ppbGxhLzUuMA0KQWNjZXB0OiAqLyoNCg0K"
+        output:
+          log:
+            expect_ids: [920110]
+  - test_id: 2
+    desc: "wf-920-110 lets it be"
+    stages:
+      - description: "raw request"
+        input:
+          dest_addr: "127.0.0.1"
+          port: 80
+          encoded_request: "R0VUIC9wIEhUVFAvMS4wDQpIb3N0OiB3d3cuZXhhbXBsZS5jb20NClVzZXItQWdlbnQ6IE1vemlsbGEvNS4wDQpBY2NlcHQ6ICovKg0KDQo="
+        output:
+          log:
+            no_expect_ids: [920110]

@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=../../../../docs/ngfw-rules.schema.json
 doc: |
   Set `upload` (wf-960-*): file uploads (the `upload` phase, each multipart part with a
   filename). Executable extensions anywhere in the name (double extensions too), names that

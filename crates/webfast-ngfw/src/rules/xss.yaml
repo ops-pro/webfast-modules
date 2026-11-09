@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=../../../../docs/ngfw-rules.schema.json
 doc: |
   Set `xss` (wf-941-*): cross-site scripting. Script and embedding tags, script schemes, event
   handler attributes, the DOM and functions a payload reaches for, a tag split by another

@@ -217,8 +217,8 @@ pub(crate) mod tests {
         let sqli_detect: Detector = |t| sqli(t).is_some();
         let xss_detect: Detector = xss;
         for (what, payloads, chain, gates, detect) in [
-            ("sqli", SQLI, SQLI_CHAIN, &sqli_gates[..], sqli_detect),
-            ("xss", XSS, XSS_CHAIN, &xss_gates[..], xss_detect),
+            ("sqli", &SQLI[..], SQLI_CHAIN, &sqli_gates[..], sqli_detect),
+            ("xss", &XSS[..], XSS_CHAIN, &xss_gates[..], xss_detect),
         ] {
             println!("\n{what}: {} payloads, {} benign values", payloads.len(), BENIGN.len());
             for context in ["as is", "query %20", "query +"] {
@@ -241,7 +241,7 @@ pub(crate) mod tests {
                         }
                     }
                     let (mut fired, mut false_positives) = (0, Vec::new());
-                    for b in BENIGN {
+                    for b in BENIGN.iter() {
                         let text = through(chain, &encode(b));
                         if gated(&text, gate) {
                             fired += 1;

@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=../../../../docs/ngfw-rules.schema.json
 doc: |
   Set `php` (wf-933-*): PHP injection. Stream wrappers, PHP open tags in a parameter, the
   dangerous functions called, the ini directives attackers set, serialized objects, and `.php`

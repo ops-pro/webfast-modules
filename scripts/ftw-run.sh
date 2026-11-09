@@ -31,7 +31,7 @@ failed=()
 for pass in "${passes[@]}"; do
   case "$pass" in
     all) dir=/tests ;;
-    cve) dir=/tests/cve ;;
+    cve) dir=/tests/rules/cve ;;
     *) echo "unknown pass $pass (all, cve)" >&2; exit 2 ;;
   esac
   export FTW_PASS=$pass

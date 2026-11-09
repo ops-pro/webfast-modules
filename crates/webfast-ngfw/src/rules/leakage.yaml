@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=../../../../docs/ngfw-rules.schema.json
 doc: |
   Set `leakage` (wf-950-*, the `response` phase): what an upstream should not tell the client.
   In the first bytes of a 200 or 5xx response: PHP errors and stack traces, Java and Python

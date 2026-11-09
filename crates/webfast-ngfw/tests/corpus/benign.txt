@@ -1,0 +1,104 @@
+it's #1
+O'Brien -- CEO
+the procedure analyses the data
+power failure; shutdown at 5
+a < b and c > d
+java script course for beginners
+O'Brien
+D'Angelo
+Patrick O'Neil
+Sinéad O'Connor
+rock 'n' roll
+it's fine
+don't stop me now
+l'Oréal Paris
+McDonald's
+O'Reilly & Associates
+I'd like 2 or 3
+it's 5 o'clock somewhere
+5'11"
+can't, won't, shouldn't
+black and white
+this or that
+Select your size
+please select one option from the list
+union station
+order by price
+drop me a line
+insert coin to continue
+update available
+where are you from
+from here to there
+1 or 2 items
+5 and 6
+cats and dogs or birds
+Tom & Jerry
+fish & chips
+how to select from a list in python
+SQL union vs join
+"quoted text"
+'single quoted'
+He said "hello" and left
+Jean-Luc Picard
+https://example.com/path?a=1&b=2
+http://localhost:8080/
+/images/logo.png
+{"a":1,"b":[1,2]}
+{"name":"O'Brien","tags":["x","y"]}
+[1,2,3]
+john.doe+tag@example.com
+2026-11-08
+11/08/2026
+2026-11-08T10:00:00Z
+10:30
+42
+-3.14
+1e10
++33 1 23 45 67 89
+(555) 123-4567
+Hello, world!
+a = b
+x=1
+price: $10 (incl. tax)
+50% off!
+C# and C++
+#hashtag
+--verbose
+foo -- bar
+semi; colon
+1;2;3
+a||b
+key=value; other=thing
+dGVzdA==
+550e8400-e29b-41d4-a716-446655440000
+#ff0000
+Mr. & Mrs. Smith
+100% cotton (machine wash)
+Q&A: what's new?
+see you @ 5pm
+a < b
+1 < 2 and 3 > 2
+I <3 you
+AT&T
+**bold** and _italic_
+[link](https://example.com)
+C:\Users\me\file.txt
+javascript is fun
+on sale now
+turn on the light
+onboarding checklist
+color=red&size=m
+<b>bold</b>
+<p>Hello</p>
+<br>
+<i>it</i>
+Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36
+Mozilla/5.0 (X11; Linux x86_64; rv:132.0) Gecko/20100101 Firefox/132.0
+Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1
+curl/8.5.0
+Googlebot/2.1 (+http://www.google.com/bot.html)
+https://www.google.com/
+https://example.com/search?q=shoes&page=2
+android-app://com.google.android.gm/
+session=abc123def456
+eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl

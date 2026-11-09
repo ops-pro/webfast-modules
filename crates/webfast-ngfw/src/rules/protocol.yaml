@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=../../../../docs/ngfw-rules.schema.json
 doc: |
   Set `protocol` (wf-920-*): protocol anomalies. Methods outside the usual seven, HTTP/1.0
   without Host, control and non-UTF-8 bytes, nulls, double encoding, `..` that survives
@@ -45,6 +46,11 @@ rules:
       the default site of a server by its address. Browsers have sent Host since the nineties.
       Old monitoring probes and load balancer health checks may still send bare HTTP/1.0; such a
       probe is better given its own path and excluded there (or `disable: [wf-920-110]`).
+    examples:
+      hit:
+        - { raw: "GET /p HTTP/1.0\r\nUser-Agent: Mozilla/5.0\r\nAccept: */*\r\n\r\n" }
+      pass:
+        - { raw: "GET /p HTTP/1.0\r\nHost: www.example.com\r\nUser-Agent: Mozilla/5.0\r\nAccept: */*\r\n\r\n" }
 
   - id: wf-920-120
     set: protocol
@@ -67,6 +73,11 @@ rules:
       in a header value. No browser or HTTP library puts one there; they are used to confuse
       parsers, logs and terminals. The HTTP parser refuses most of them already; the rule catches
       what gets through. False positives are practically unknown.
+    examples:
+      pass:
+        # Over HTTP/1.1 the server's parser answers 400 before the filter sees the byte.
+        - { raw: "GET /p HTTP/1.1\r\nHost: www.example.com\r\nUser-Agent: Mozilla/5.0\r\nAccept: */*\r\nX-Note: a\x01b\r\nConnection: close\r\n\r\n", status: 400 }
+        - { raw: "GET /p HTTP/1.1\r\nHost: www.example.com\r\nUser-Agent: Mozilla/5.0\r\nAccept: */*\r\nX-Note: a\tb\r\nConnection: close\r\n\r\n" }
 
   - id: wf-920-130
     set: protocol
@@ -153,6 +164,14 @@ rules:
       This is how a request is smuggled past a proxy that reads one framing to a backend that
       reads the other, so the rule blocks at once. RFC 9112 tells a server to treat it as an
       error; no correct client sends it.
+    examples:
+      pass:
+        # Over HTTP/1.1 the server's parser settles the framing before the filter sees the
+        # headers (a repeated equal Content-Length kept once, Transfer-Encoding over
+        # Content-Length), so the request goes on with one framing and the rule sees none.
+        - { raw: "POST /p HTTP/1.1\r\nHost: www.example.com\r\nUser-Agent: Mozilla/5.0\r\nAccept: */*\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 3\r\nContent-Length: 3\r\nConnection: close\r\n\r\na=1", status: 200 }
+        - { raw: "POST /p HTTP/1.1\r\nHost: www.example.com\r\nUser-Agent: Mozilla/5.0\r\nAccept: */*\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 3\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n3\r\na=1\r\n0\r\n\r\n", status: 200 }
+        - { raw: "POST /p HTTP/1.1\r\nHost: www.example.com\r\nUser-Agent: Mozilla/5.0\r\nAccept: */*\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 3\r\nConnection: close\r\n\r\na=1" }
 
   - id: wf-920-180
     set: protocol

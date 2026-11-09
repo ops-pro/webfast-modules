@@ -35,6 +35,8 @@ pub mod compile;
 pub mod config;
 pub mod detect;
 pub mod engine;
+#[cfg(all(test, feature = "libinjection"))]
+mod ftw;
 pub mod geo;
 pub mod iplist;
 pub mod log;

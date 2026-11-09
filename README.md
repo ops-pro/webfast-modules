@@ -99,11 +99,19 @@ cargo test --workspace                                   # unit tests and the en
 cargo clippy --workspace --all-targets -- -D warnings
 cargo clippy -p webfast-ngfw --all-targets --no-default-features -- -D warnings   # the filter without the challenge and libinjection
 scripts/check.sh                                         # the CI checks, in Docker
-python scripts/ftw-convert.py --check                    # the go-ftw YAML tests are current (PyYAML)
+UPDATE_FTW_TESTS=1 cargo test -p webfast-ngfw --lib ftw  # write tests/ftw/ from the rules' examples and tests/corpus/
+UPDATE_RULES_DOC=1 cargo test -p webfast-ngfw --lib      # write docs/ngfw-rules.md and its JSON Schema
 WEBFAST_BIN=… scripts/ftw-run.sh                         # go-ftw against a webfast binary, in Docker
 ```
 
-`scripts/ftw-run.sh` runs the filter's go-ftw tests (`crates/webfast-ngfw/tests/ftw/`) blackbox,
+A rule's tests are in the rule: its `examples`, requests it must match (`hit`) and must not
+(`pass`), next to its operator in `crates/webfast-ngfw/src/rules/*.yaml`. The value lists of the
+corpus are `crates/webfast-ngfw/tests/corpus/*.txt`, one value per line (SecLists' format). From
+these two the go-ftw files of `crates/webfast-ngfw/tests/ftw/` are written (a test fails when they
+are out of date), and `tests/ftw.rs` runs them in process, both passes, in `cargo test`. The rules
+files' JSON Schema is [docs/ngfw-rules.schema.json](docs/ngfw-rules.schema.json).
+
+`scripts/ftw-run.sh` runs the same go-ftw files blackbox,
 with `ci/ftw/compose.yaml` (go-ftw, albedo as the backend, the images pinned): once with every
 built-in set, as the filter ships, and once with the cve set alone. The binary is webfast's,
 built with this checkout's modules (the script's header has the command; CI's `ftw` job builds

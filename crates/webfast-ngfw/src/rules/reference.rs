@@ -4,7 +4,7 @@
 //! compares the file with what this gives, and writes it with `UPDATE_RULES_DOC=1`.
 
 use super::super::config::{RulesConfig, compose};
-use super::super::rule::{Operator, Rule, RulesFile};
+use super::super::rule::{Example, Operator, Rule, RulesFile};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::Path;
@@ -334,9 +334,50 @@ fn section(out: &mut String, rule: &Rule) {
     if !shown.is_empty() {
         let _ = writeln!(out, "- References: {}", shown.join(", "));
     }
+    let examples = |list: &[Example]| list.iter().map(example).collect::<Vec<_>>().join(", ");
+    if !rule.examples.hit.is_empty() {
+        let _ = writeln!(out, "- Matches: {}", examples(&rule.examples.hit));
+    }
+    if !rule.examples.pass.is_empty() {
+        let _ = writeln!(out, "- Does not match: {}", examples(&rule.examples.pass));
+    }
     out.push('\n');
     if let Some(doc) = &rule.doc {
         let _ = write!(out, "{}\n\n", doc.trim());
+    }
+}
+
+/// An example in a line: a value as code; a request as its method and target, the headers it
+/// sets named; a response as its status.
+fn example(example: &Example) -> String {
+    match example {
+        Example::Value(value) => code(value),
+        Example::Request(request) if request.raw.is_some() => {
+            let raw = request.raw.as_deref().unwrap_or("");
+            let line = raw
+                .split(
+                    "
+",
+                )
+                .next()
+                .unwrap_or(raw);
+            let mut text = format!("raw {}", code(line));
+            if let Some(status) = request.status {
+                text.push_str(&format!(", answered {status}"));
+            }
+            text
+        }
+        Example::Request(request) => {
+            let mut text = code(&format!("{} {}", request.method, request.uri));
+            if !request.headers.is_empty() {
+                let names: Vec<String> = request.headers.iter().map(|(k, v)| format!("{k}: {v}")).collect();
+                text.push_str(&format!(" with {}", codes(&names)));
+            }
+            if let Some(response) = &request.response {
+                text.push_str(&format!(", answered {}", response.status));
+            }
+            text
+        }
     }
 }
 

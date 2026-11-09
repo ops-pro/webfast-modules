@@ -1,0 +1,39 @@
+# Written by src/ftw.rs from its source (a rule's `examples`, a list of tests/corpus/): edit
+# that, then `UPDATE_FTW_TESTS=1 cargo test -p webfast-ngfw --lib ftw`.
+meta:
+  author: "webfast"
+  description: "Microsoft Exchange ProxyShell / ProxyNotShell autodiscover SSRF (CVE-2021-34473, CVE-2022-41040)"
+  enabled: true
+  name: "wf-cve-2021-34473"
+rule_id: 20210034473
+tests:
+  - test_id: 1
+    desc: "wf-cve-2021-34473 matches"
+    stages:
+      - description: "request"
+        input:
+          dest_addr: "127.0.0.1"
+          port: 80
+          method: "GET"
+          uri: "/autodiscover/autodiscover.json?@x.test/owa/&Email=autodiscover/autodiscover.json%3F@x.test"
+          version: "HTTP/1.1"
+          headers:
+            "host": "www.example.com"
+        output:
+          log:
+            expect_ids: [20210034473]
+  - test_id: 2
+    desc: "wf-cve-2021-34473 lets it be"
+    stages:
+      - description: "request"
+        input:
+          dest_addr: "127.0.0.1"
+          port: 80
+          method: "GET"
+          uri: "/autodiscover/autodiscover.xml"
+          version: "HTTP/1.1"
+          headers:
+            "host": "www.example.com"
+        output:
+          log:
+            no_expect_ids: [20210034473]

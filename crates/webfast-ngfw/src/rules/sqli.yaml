@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=../../../../docs/ngfw-rules.schema.json
 doc: |
   Set `sqli` (wf-942-*): SQL injection. Statements and keywords no form value needs, the
   time-based and file functions, tautologies, comment and quote tricks, stacked statements,

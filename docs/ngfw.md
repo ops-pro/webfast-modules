@@ -247,7 +247,37 @@ rules:
       urls: []                    # https:// only
     doc: |                        # what it catches, why its score, its false positives, how to exclude it
       A PHP stream wrapper (`php://`, `phar://` …) in a value: …
+    examples:                     # its tests: what it must match and what it must let be
+      hit:
+        - "php://filter/convert.base64-encode/resource=index.php"   # a value: put in its targets
+        - { uri: "/p?file=phar://upload/x.jpg" }                   # a request, sent as it is
+      pass:
+        - "https://example.com/php/manual"
 ```
+
+**Examples.** `examples.hit` and `examples.pass` are the rule's tests, not used by the server. A
+value is put where the rule looks, in each of its targets that has a place in a request: a query
+parameter (a space as `%20` and as `+`; with the body among its targets or in the `body` phase,
+a form body too), a parameter's or cookie's name, a cookie, a header (`ua`, `host`,
+`headers.<name>`), the path (a value starting with `/`), the method, a form or a JSON body
+(`body.json/<pointer>` builds the object). A request is written out for what a value does not say
+— a path with a header, a missing header, a method: `{method, uri, headers, body}`, sent as it is
+with only the `host` added; with `response: {status, headers, body}`, the backend answers that
+(for a `response` rule: the request goes to its `/reflect`, as albedo's). `{raw: "…"}` is a
+request's bytes as they are (`
+` written out; an HTTP/1.1 one ends with `Connection: close`),
+for another HTTP version, no Host, a header twice, a byte the parser may refuse: go-ftw's
+`encoded_request`. `status` makes the stage expect that status too, e.g. the parser's 400 for a
+request the filter never sees, in `pass`. A `hit` must make the
+rule match, a `pass` must not; each becomes a go-ftw test (`expect_ids` / `no_expect_ids` with the
+rule's number) in `crates/webfast-ngfw/tests/ftw/rules/<set>/<number>.yaml`, run in `cargo test`
+and against a binary in CI. A site's own rules may have them too.
+
+**The schema.** [ngfw-rules.schema.json](ngfw-rules.schema.json) is the JSON Schema of a rules
+file, made from the types the server reads them with (a test keeps it current): every field,
+every target, transformation and operator, with what each means. An editor with the YAML
+language server takes it from a first line `# yaml-language-server: $schema=<path or URL>`, as
+the built-in files have it.
 
 Required: `id` (`wf-` + three digits + `-` + three digits for the built-in ones, `wf-cve-` + the
 CVE's year and number for the `cve` set; a site's own may be any `[a-z0-9-]+`), `phase`,
@@ -740,10 +770,17 @@ covers (an image, a 304) are not read. Of the body, at most `body.max_inspect` b
   crate's test data, or a writer-made file), the response inspection chaining the body. The
   metadata: malformed `refs` refused, `disable_tags`, every built-in rule with a `doc`, a
   `confidence` and a CWE (a `cve` rule also with its CVE, a URL and its product's tag), and the
-  reference in step with the files. The sets together over the evaluation set: every payload
-  refused as a query value (`%20` and `+`) and as a cookie, no benign value hit by any rule. Each
-  `cve` rule takes the marker of its exploit's request and lets an ordinary request to the same
-  product through. A query parameter and a cookie without `=` (`?debug`, `Cookie: flag`).
+  reference and the rules files' JSON Schema (docs/ngfw-rules.schema.json) in step with the
+  code. The sets together over the evaluation set (tests/corpus/*.txt): every payload refused as
+  a query value (`%20` and `+`) and as a cookie, no benign value hit by any rule. A query
+  parameter and a cookie without `=` (`?debug`, `Cookie: flag`). `src/ftw.rs`: the go-ftw files
+  of tests/ftw/ in step with the rules' `examples` and the corpus, and every built-in rule with a
+  `hit` example (but those its `WITHOUT_EXAMPLES` names: the rules still to be given one).
+- `tests/ftw.rs`: the go-ftw files run in process, as CI's blackbox run does: a server with the
+  filter of ci/ftw/ngfw-all.yaml (every built-in set, ftw-all.yaml's ignores skipped) and of
+  ngfw-cve.yaml (the cve set alone, over tests/ftw/rules/cve, nothing ignored), a backend that
+  answers 200 and `POST /reflect` as albedo does; each stage's status and its `expect_ids` /
+  `no_expect_ids` against the `ruleId`s between two marker requests in the filter's log.
 - `tests/cost.rs`: a counting allocator holds a clean GET's connection and head phases under
   `builtin: all` to no allocation; an ignored test prints their time.
 - `tests/ngfw.rs`: a server booted by the core's test harness (`webfast_core::harness`) with a

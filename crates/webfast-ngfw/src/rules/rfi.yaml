@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=../../../../docs/ngfw-rules.schema.json
 doc: |
   Set `rfi` (wf-931-*): remote file inclusion and server-side request forgery. A URL in a
   parameter whose name says it is a target (url, src, redirect, file, ...) pointing at an

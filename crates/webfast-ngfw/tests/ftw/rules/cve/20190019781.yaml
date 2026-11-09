@@ -1,0 +1,39 @@
+# Written by src/ftw.rs from its source (a rule's `examples`, a list of tests/corpus/): edit
+# that, then `UPDATE_FTW_TESTS=1 cargo test -p webfast-ngfw --lib ftw`.
+meta:
+  author: "webfast"
+  description: "Citrix ADC / Gateway path traversal to /vpns/ (CVE-2019-19781)"
+  enabled: true
+  name: "wf-cve-2019-19781"
+rule_id: 20190019781
+tests:
+  - test_id: 1
+    desc: "wf-cve-2019-19781 matches"
+    stages:
+      - description: "request"
+        input:
+          dest_addr: "127.0.0.1"
+          port: 80
+          method: "GET"
+          uri: "/vpn/../vpns/cfg/smb.conf"
+          version: "HTTP/1.1"
+          headers:
+            "host": "www.example.com"
+        output:
+          log:
+            expect_ids: [20190019781]
+  - test_id: 2
+    desc: "wf-cve-2019-19781 lets it be"
+    stages:
+      - description: "request"
+        input:
+          dest_addr: "127.0.0.1"
+          port: 80
+          method: "GET"
+          uri: "/vpns/portal/index.html"
+          version: "HTTP/1.1"
+          headers:
+            "host": "www.example.com"
+        output:
+          log:
+            no_expect_ids: [20190019781]

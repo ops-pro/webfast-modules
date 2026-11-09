@@ -1,0 +1,44 @@
+# Written by src/ftw.rs from its source (a rule's `examples`, a list of tests/corpus/): edit
+# that, then `UPDATE_FTW_TESTS=1 cargo test -p webfast-ngfw --lib ftw`.
+meta:
+  author: "webfast"
+  description: "Two Content-Length headers, or Content-Length with Transfer-Encoding"
+  enabled: true
+  name: "wf-920-170"
+rule_id: 920170
+tests:
+  - test_id: 1
+    desc: "wf-920-170 lets it be"
+    stages:
+      - description: "raw request"
+        input:
+          dest_addr: "127.0.0.1"
+          port: 80
+          encoded_request: "UE9TVCAvcCBIVFRQLzEuMQ0KSG9zdDogd3d3LmV4YW1wbGUuY29tDQpVc2VyLUFnZW50OiBNb3ppbGxhLzUuMA0KQWNjZXB0OiAqLyoNCkNvbnRlbnQtVHlwZTogYXBwbGljYXRpb24veC13d3ctZm9ybS11cmxlbmNvZGVkDQpDb250ZW50LUxlbmd0aDogMw0KQ29udGVudC1MZW5ndGg6IDMNCkNvbm5lY3Rpb246IGNsb3NlDQoNCmE9MQ=="
+        output:
+          status: 200
+          log:
+            no_expect_ids: [920170]
+  - test_id: 2
+    desc: "wf-920-170 lets it be"
+    stages:
+      - description: "raw request"
+        input:
+          dest_addr: "127.0.0.1"
+          port: 80
+          encoded_request: "UE9TVCAvcCBIVFRQLzEuMQ0KSG9zdDogd3d3LmV4YW1wbGUuY29tDQpVc2VyLUFnZW50OiBNb3ppbGxhLzUuMA0KQWNjZXB0OiAqLyoNCkNvbnRlbnQtVHlwZTogYXBwbGljYXRpb24veC13d3ctZm9ybS11cmxlbmNvZGVkDQpDb250ZW50LUxlbmd0aDogMw0KVHJhbnNmZXItRW5jb2Rpbmc6IGNodW5rZWQNCkNvbm5lY3Rpb246IGNsb3NlDQoNCjMNCmE9MQ0KMA0KDQo="
+        output:
+          status: 200
+          log:
+            no_expect_ids: [920170]
+  - test_id: 3
+    desc: "wf-920-170 lets it be"
+    stages:
+      - description: "raw request"
+        input:
+          dest_addr: "127.0.0.1"
+          port: 80
+          encoded_request: "UE9TVCAvcCBIVFRQLzEuMQ0KSG9zdDogd3d3LmV4YW1wbGUuY29tDQpVc2VyLUFnZW50OiBNb3ppbGxhLzUuMA0KQWNjZXB0OiAqLyoNCkNvbnRlbnQtVHlwZTogYXBwbGljYXRpb24veC13d3ctZm9ybS11cmxlbmNvZGVkDQpDb250ZW50LUxlbmd0aDogMw0KQ29ubmVjdGlvbjogY2xvc2UNCg0KYT0x"
+        output:
+          log:
+            no_expect_ids: [920170]

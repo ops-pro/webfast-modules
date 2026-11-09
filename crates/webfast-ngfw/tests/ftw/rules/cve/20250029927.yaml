@@ -1,0 +1,41 @@
+# Written by src/ftw.rs from its source (a rule's `examples`, a list of tests/corpus/): edit
+# that, then `UPDATE_FTW_TESTS=1 cargo test -p webfast-ngfw --lib ftw`.
+meta:
+  author: "webfast"
+  description: "Next.js middleware bypass: x-middleware-subrequest from a client (CVE-2025-29927)"
+  enabled: true
+  name: "wf-cve-2025-29927"
+rule_id: 20250029927
+tests:
+  - test_id: 1
+    desc: "wf-cve-2025-29927 matches"
+    stages:
+      - description: "request"
+        input:
+          dest_addr: "127.0.0.1"
+          port: 80
+          method: "GET"
+          uri: "/dashboard"
+          version: "HTTP/1.1"
+          headers:
+            "host": "www.example.com"
+            "x-middleware-subrequest": "middleware"
+        output:
+          log:
+            expect_ids: [20250029927]
+  - test_id: 2
+    desc: "wf-cve-2025-29927 lets it be"
+    stages:
+      - description: "request"
+        input:
+          dest_addr: "127.0.0.1"
+          port: 80
+          method: "GET"
+          uri: "/dashboard"
+          version: "HTTP/1.1"
+          headers:
+            "host": "www.example.com"
+            "x-middleware-prefetch": "1"
+        output:
+          log:
+            no_expect_ids: [20250029927]

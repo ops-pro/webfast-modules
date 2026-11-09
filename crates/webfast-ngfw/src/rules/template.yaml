@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=../../../../docs/ngfw-rules.schema.json
 doc: |
   Set `template` (wf-944-*): server-side template injection and expression language injection.
   Template delimiters with a call inside, the Python and Java names a payload climbs through,
