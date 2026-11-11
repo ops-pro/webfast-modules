@@ -49,7 +49,6 @@ fn evaluate(engine: &CrsEngine, parts: &http::request::Parts) -> Evaluation {
         ja4: None,
         body: None,
         response: None,
-        hidden: &[],
     };
     webfast_ngfw::plugin::evaluate(engine, &[(Phase::Head, &input), (Phase::Body, &input)], Mode::Block)
 }
@@ -235,7 +234,6 @@ fn cost() {
                 ja4: None,
                 body,
                 response: None,
-                hidden: &[],
             };
             let phases = [(Phase::Head, &input), (Phase::Body, &input)];
             for _ in 0..200 {

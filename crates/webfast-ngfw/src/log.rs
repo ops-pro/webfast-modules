@@ -1,15 +1,15 @@
-//! The module's event lines (docs/ngfw.md "The log"), through webfast_core::eventlog: the common head
-//! with the country, ASN and User-Agent added to `request`, then the decision, status, scores,
-//! phase and the hits with their matched text (already cut to `log.matched` by the engine, and
-//! `REDACTED` where the JWT check hides a parameter).
+//! The module's event lines (docs/ngfw.md "The log"), through webfast_core::eventlog's events: the
+//! common head with the country, ASN, JA4 and User-Agent added to `request`, then the decision,
+//! status, scores, phase and the hits. A hit's matched text and data go with their source
+//! (src/source.rs), so the log policy hides a credential a rule matched in, and the output's
+//! privacy (`log.privacy`, `log.matched`) applies to them.
 
 use super::compile::Compiled;
 use super::engine::Evaluation;
 use super::rule::Refs;
-use std::fmt::Write as _;
 use std::net::IpAddr;
-use webfast_core::accesslog::json_escape;
-use webfast_core::eventlog::EventLog;
+use webfast_core::eventlog::{EventKind, EventLog, Field, Fields, Level};
+use webfast_core::privacy::Source;
 
 /// What a line says the request got.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,18 +47,6 @@ impl Outcome {
         }
     }
 
-    fn message(self) -> &'static str {
-        match self {
-            Outcome::Block | Outcome::Ban | Outcome::Access(_) => "request refused",
-            Outcome::LogOnly => "request let through (log_only)",
-            Outcome::Scored => "request scored",
-            Outcome::Leak => "response replaced",
-            Outcome::Cut => "response cut",
-            Outcome::Challenge(_) => "request challenged",
-            Outcome::ChallengePassed(_) => "request let through (challenge passed)",
-        }
-    }
-
     /// The `reason` field: `access`'s, or what asked for a challenge.
     fn reason(self) -> Option<&'static str> {
         match self {
@@ -84,29 +72,117 @@ pub struct Record<'a> {
     pub evaluation: Option<&'a Evaluation>,
 }
 
+/// What the module adds inside `request`: where the client is, and what it says it is.
+const REQUEST: &[Field] = &[
+    Field::public("country"),
+    Field::public("asn"),
+    Field::personal("ja4"),
+    Field::personal("user_agent"),
+];
+
+/// A hit's references (a built-in rule's).
+const REFS: &[Field] = &[
+    Field::public("cwe"),
+    Field::public("capec"),
+    Field::public("crs"),
+    Field::public("cve"),
+    Field::public("urls"),
+];
+
+/// A hit: the rule and what it decided are public; what it matched, and an engine's words on the
+/// match (`data`, the CRS's `logdata`), are the request's, classed by where they came from.
+const HIT: &[Field] = &[
+    Field::public("id"),
+    Field::public("ruleId"),
+    Field::public("set"),
+    Field::public("score"),
+    Field::public("severity"),
+    Field::public("confidence"),
+    Field::public("tags"),
+    Field::object("refs", REFS),
+    Field::public("msg"),
+    Field::payload("data"),
+    Field::public("target"),
+    Field::payload("matched"),
+];
+
+const FIELDS: &[Field] = &[
+    Field::public("builtin"),
+    Field::public("decision"),
+    Field::public("status"),
+    Field::public("reason"),
+    Field::public("score"),
+    Field::public("threshold"),
+    Field::public("phase"),
+    Field::list("hits", HIT),
+];
+
+macro_rules! kinds {
+    ($($name:ident: $msg:literal;)*) => {
+        $(static $name: EventKind = EventKind { msg: $msg, request: REQUEST, fields: FIELDS };)*
+    };
+}
+
+kinds! {
+    REFUSED: "request refused";
+    LET_THROUGH: "request let through (log_only)";
+    SCORED: "request scored";
+    REPLACED: "response replaced";
+    CUT: "response cut";
+    CHALLENGED: "request challenged";
+    CHALLENGE_PASSED: "request let through (challenge passed)";
+}
+
+/// go-ftw's marker line (`log.test_marker`): the header's name, and its value as the request has
+/// it.
+static TEST_MARKER: EventKind = EventKind {
+    msg: "test marker",
+    request: &[],
+    fields: &[Field::public("marker_header"), Field::payload("marker")],
+};
+
+impl Outcome {
+    fn kind(self) -> &'static EventKind {
+        match self {
+            Outcome::Block | Outcome::Ban | Outcome::Access(_) => &REFUSED,
+            Outcome::LogOnly => &LET_THROUGH,
+            Outcome::Scored => &SCORED,
+            Outcome::Leak => &REPLACED,
+            Outcome::Cut => &CUT,
+            Outcome::Challenge(_) => &CHALLENGED,
+            Outcome::ChallengePassed(_) => &CHALLENGE_PASSED,
+        }
+    }
+}
+
+/// The marker line of go-ftw's request (`log.test_marker`).
+pub fn marker(log: &EventLog, parts: &http::request::Parts, client_ip: IpAddr, header: &str, value: &str) {
+    log.event(&TEST_MARKER, Level::Info, parts, client_ip, |e| {
+        e.str("marker_header", header);
+        e.value("marker", Source::Header(header), value);
+    });
+}
+
 pub fn write(log: &EventLog, compiled: &Compiled, record: &Record<'_>) {
     let level = match record.outcome {
-        Outcome::LogOnly | Outcome::Scored => "warn",
-        _ => "info",
+        Outcome::LogOnly | Outcome::Scored => Level::Warn,
+        _ => Level::Info,
     };
-    let request_fields = |line: &mut String| {
-        line.push_str(r#","country":""#);
-        line.push_str(
+    let request = |e: &mut Fields<'_>| {
+        e.str(
+            "country",
             record
                 .country
                 .as_ref()
                 .and_then(|c| std::str::from_utf8(c).ok())
                 .unwrap_or("--"),
         );
-        let _ = write!(line, r#"","asn":{}"#, record.asn.unwrap_or(0));
+        e.u64("asn", u64::from(record.asn.unwrap_or(0)));
         if let Some(ja4) = &record.ja4 {
-            line.push_str(r#","ja4":""#);
-            line.push_str(ja4.as_str());
-            line.push('"');
+            e.str("ja4", ja4.as_str());
         }
-        line.push_str(r#","user_agent":""#);
-        json_escape(
-            line,
+        e.str(
+            "user_agent",
             record
                 .parts
                 .headers
@@ -114,163 +190,104 @@ pub fn write(log: &EventLog, compiled: &Compiled, record: &Record<'_>) {
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or(""),
         );
-        line.push('"');
     };
-    let fields = |line: &mut String| {
-        let _ = write!(
-            line,
-            r#","builtin":"{}","decision":"{}","status":{}"#,
-            super::rules::BUILTIN_VERSION,
-            record.outcome.decision(),
-            record.status
-        );
+    let fields = |e: &mut Fields<'_>| {
+        e.str("builtin", super::rules::BUILTIN_VERSION);
+        e.str("decision", record.outcome.decision());
+        e.u64("status", u64::from(record.status));
         if let Some(reason) = record.outcome.reason() {
-            let _ = write!(line, r#","reason":"{reason}""#);
+            e.str("reason", reason);
         }
         if let Some(evaluation) = record.evaluation {
-            let _ = write!(
-                line,
-                r#","score":{},"threshold":{},"phase":"{}","hits":["#,
-                evaluation.score + evaluation.shadow,
-                record.threshold,
-                evaluation.phase.name()
-            );
-            for (i, hit) in evaluation.hits.iter().enumerate() {
-                if i > 0 {
-                    line.push(',');
+            e.u64("score", u64::from(evaluation.score + evaluation.shadow));
+            e.u64("threshold", u64::from(record.threshold));
+            e.str("phase", evaluation.phase.name());
+            e.list("hits", |l| {
+                for hit in &evaluation.hits {
+                    l.item(|h| match &hit.engine {
+                        Some(rule) => engine_hit(h, rule, hit),
+                        None => builtin_hit(h, &compiled.rules[hit.rule as usize], hit),
+                    });
                 }
-                match &hit.engine {
-                    Some(rule) => engine_hit(line, rule, hit),
-                    None => builtin_hit(line, &compiled.rules[hit.rule as usize], hit),
-                }
-            }
-            line.push(']');
+            });
         } else {
-            let _ = write!(line, r#","threshold":{}"#, record.threshold);
+            e.u64("threshold", u64::from(record.threshold));
         }
     };
-    log.record_with(
+    log.event_with(
+        record.outcome.kind(),
         level,
-        record.outcome.message(),
-        record.client_ip,
         record.parts,
-        &request_fields,
-        &fields,
+        record.client_ip,
+        request,
+        fields,
     );
 }
 
-/// A hit of a built-in rule, as a JSON object.
-fn builtin_hit(line: &mut String, rule: &super::compile::CompiledRule, hit: &super::engine::Hit) {
-    line.push_str(r#"{"id":""#);
-    json_escape(line, &rule.id);
-    line.push('"');
+/// A hit of a built-in rule.
+fn builtin_hit(h: &mut Fields<'_>, rule: &super::compile::CompiledRule, hit: &super::engine::Hit) {
+    h.str("id", &rule.id);
     if let Some(number) = rule.number {
         // The rule by number, where test tools look for it (go-ftw's `ruleId`).
-        let _ = write!(line, r#","ruleId":{number}"#);
+        h.u64("ruleId", number);
     }
-    line.push_str(r#","set":""#);
-    json_escape(line, &rule.set);
-    let _ = write!(
-        line,
-        r#"","score":{},"severity":"{}""#,
-        rule.score,
-        rule.severity.name()
-    );
+    h.str("set", &rule.set);
+    h.u64("score", u64::from(rule.score));
+    h.str("severity", rule.severity.name());
     if let Some(confidence) = rule.confidence {
-        let _ = write!(line, r#","confidence":"{}""#, confidence.name());
+        h.str("confidence", confidence.name());
     }
-    line.push_str(r#","tags":"#);
-    strings(line, &rule.tags);
+    h.strs("tags", &rule.tags);
     if !rule.refs.is_empty() {
-        refs(line, &rule.refs);
+        refs(h, &rule.refs);
     }
-    target_matched(line, hit);
+    target_matched(h, hit);
 }
 
-/// A hit of a rule engine's rule (src/plugin.rs), as a JSON object: its message in place of the
-/// built-in rules' references.
-fn engine_hit(line: &mut String, rule: &super::plugin::EngineRule, hit: &super::engine::Hit) {
-    line.push_str(r#"{"id":""#);
-    json_escape(line, &rule.id);
-    line.push('"');
+/// A hit of a rule engine's rule (src/plugin.rs): its message in place of the built-in rules'
+/// references, and its words on the match.
+fn engine_hit(h: &mut Fields<'_>, rule: &super::plugin::EngineRule, hit: &super::engine::Hit) {
+    h.str("id", &rule.id);
     if let Some(number) = rule.number {
-        let _ = write!(line, r#","ruleId":{number}"#);
+        h.u64("ruleId", u64::from(number));
     }
-    line.push_str(r#","set":""#);
-    json_escape(line, &rule.set);
-    let _ = write!(line, r#"","score":{},"severity":"{}""#, hit.score, rule.severity.name());
-    line.push_str(r#","tags":"#);
-    strings(line, &rule.tags);
+    h.str("set", &rule.set);
+    h.u64("score", u64::from(hit.score));
+    h.str("severity", rule.severity.name());
+    h.strs("tags", &rule.tags);
     if !rule.msg.is_empty() {
-        line.push_str(r#","msg":""#);
-        json_escape(line, &rule.msg);
-        line.push('"');
+        h.str("msg", &rule.msg);
     }
     if let Some(data) = &hit.data {
-        line.push_str(r#","data":""#);
-        json_escape(line, data);
-        line.push('"');
+        let source = hit.data_source.source(h.policy());
+        h.value("data", source, data);
     }
-    target_matched(line, hit);
+    target_matched(h, hit);
 }
 
-fn target_matched(line: &mut String, hit: &super::engine::Hit) {
-    line.push_str(r#","target":""#);
-    json_escape(line, &hit.target);
-    line.push_str(r#"","matched":""#);
-    json_escape(line, &hit.matched);
-    line.push_str("\"}");
+fn target_matched(h: &mut Fields<'_>, hit: &super::engine::Hit) {
+    h.str("target", &hit.target);
+    let source = hit.source.source(h.policy());
+    h.value("matched", source, &hit.matched);
 }
 
-/// A JSON array of strings, written into `line`.
-fn strings<T: AsRef<str>>(line: &mut String, items: &[T]) {
-    line.push('[');
-    for (i, item) in items.iter().enumerate() {
-        if i > 0 {
-            line.push(',');
-        }
-        line.push('"');
-        json_escape(line, item.as_ref());
-        line.push('"');
-    }
-    line.push(']');
-}
-
-/// `,"refs":{...}` with the lists that are not empty.
-fn refs(line: &mut String, refs: &Refs) {
-    line.push_str(r#","refs":{"#);
-    let mut first = true;
-    let mut key = |line: &mut String, name: &str| {
-        if !first {
-            line.push(',');
-        }
-        first = false;
-        let _ = write!(line, r#""{name}":"#);
-    };
-    for (name, list) in [("cwe", &refs.cwe), ("capec", &refs.capec)] {
-        if !list.is_empty() {
-            key(line, name);
-            strings(line, list);
-        }
-    }
-    if !refs.crs.is_empty() {
-        key(line, "crs");
-        line.push('[');
-        for (i, id) in refs.crs.iter().enumerate() {
-            if i > 0 {
-                line.push(',');
+/// `refs` with the lists that are not empty.
+fn refs(h: &mut Fields<'_>, refs: &Refs) {
+    h.object("refs", |r| {
+        for (name, list) in [("cwe", &refs.cwe), ("capec", &refs.capec)] {
+            if !list.is_empty() {
+                r.strs(name, list);
             }
-            let _ = write!(line, "{id}");
         }
-        line.push(']');
-    }
-    for (name, list) in [("cve", &refs.cve), ("urls", &refs.urls)] {
-        if !list.is_empty() {
-            key(line, name);
-            strings(line, list);
+        if !refs.crs.is_empty() {
+            r.numbers("crs", refs.crs.iter().map(|&n| u64::from(n)));
         }
-    }
-    line.push('}');
+        for (name, list) in [("cve", &refs.cve), ("urls", &refs.urls)] {
+            if !list.is_empty() {
+                r.strs(name, list);
+            }
+        }
+    });
 }
 
 #[cfg(test)]
@@ -309,6 +326,8 @@ mod tests {
             data: None,
             target: "upload.ext".into(),
             matched: "php".into(),
+            source: crate::source::HitSource::Payload,
+            data_source: crate::source::HitSource::Payload,
         });
         evaluation.hits.push(Hit {
             rule: 1,
@@ -317,6 +336,8 @@ mod tests {
             data: None,
             target: "upload.ext".into(),
             matched: "exe".into(),
+            source: crate::source::HitSource::Payload,
+            data_source: crate::source::HitSource::Payload,
         });
         write(
             &log,

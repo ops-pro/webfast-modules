@@ -50,7 +50,8 @@ geo databases are read again when their files change (checked every `reload`).
 mode: block                       # block | log_only | challenge: the default for every rule and set
 log:
   output: /var/log/web/ngfw.log   # stdout | stderr | discard | a file, relative to this file
-  matched: 200                    # bytes of the matched text written per hit; 0: none
+  matched: 200                    # bytes of the matched text written per hit; 0: none (the payload dropped)
+  privacy: { personal: hash }     # this output's privacy over webfast's log_policy (The log)
   passed: false                   # also write requests let through with hits (under the threshold, or hits that only log)
   test_marker: X-CRS-Test         # off by default: a request with this header also writes a marker line (go-ftw)
 threshold: 5                      # the sum of scores from which a request is refused
@@ -538,12 +539,13 @@ line.
 
 ## The log
 
-One JSON line per event through the core's `webfast_core::eventlog`, extended with the module's fields:
+One JSON line per event through the core's events (`webfast_core::eventlog::EventLog::event_with`),
+with the module's fields:
 
 ```json
 {"level":"info","ts":1760788800.123,"logger":"ngfw","msg":"request refused","builtin":"2026-11-08",
- "request":{"client_ip":"203.0.113.7","country":"NL","asn":1136,"method":"POST","host":"www.example.com",
-            "uri":"/upload","user_agent":"Mozilla/5.0 …"},
+ "request":{"id":"6f0c2a9e41d3b7580000000000000001","client_ip":"203.0.113.7","method":"POST",
+            "host":"www.example.com","uri":"/upload","country":"NL","asn":1136,"user_agent":"Mozilla/5.0 …"},
  "decision":"block","status":403,"score":9,"threshold":5,"phase":"upload",
  "hits":[{"id":"wf-960-110","set":"upload","score":5,"severity":"critical","confidence":"high",
           "tags":["OWASP_A04","upload","webshell"],
@@ -555,8 +557,31 @@ One JSON line per event through the core's `webfast_core::eventlog`, extended wi
           "target":"upload.head","matched":"<?php"}]}
 ```
 
-`request.ja4` is the client's JA4 fingerprint when the connection has one (TLS over TCP), after
-`asn`; absent otherwise.
+`request.id` is the request's id, the same as in the access log's line and every other log's
+(webfast's docs/configuration.md, Log privacy). `request.ja4` is the client's JA4 fingerprint
+when the connection has one (TLS over TCP), after `asn`; absent otherwise.
+
+**Privacy.** The lines follow webfast's log policy (the Caddyfile's global `log_policy`, its
+docs/logging.md): every value has a class, and the output shows each class as the policy and
+`log.privacy` say. The rule, its id, number, set, score, severity, tags, references, target, the
+decision and the scores are public; the client's address, its JA4 and the User-Agent personal
+(`personal: hash` writes `h:` and 16 hexadecimal characters in their place); a hit's `matched` and
+`data` are payload, raised by where the rule matched:
+
+| Where | `matched` and `data` |
+| --- | --- |
+| a parameter of the policy's `secret_params` or the JWT check's `from_params`, a form's or JSON body's field whose last name is a secret (`password`, `token`, `api_key`, … and the policy's `secret_fields`) | `REDACTED` |
+| `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, the policy's `secret_headers`; any cookie | `REDACTED` |
+| the query string (`query`) or the path read whole | `REDACTED` when the match touches a secret parameter (or a `path_classes` segment) |
+| a `Referer`, the URI as SecLang reads it (`REQUEST_URI`, `QUERY_STRING`, …) | `REDACTED` when its query has a secret parameter |
+| a JSON body read whole (`body.json`) | `REDACTED` when the body has a secret field |
+| the raw body, every header or cookie at once, a variable not known | `REDACTED` |
+| the names of a collection (`args_names`), anything else | shown, cut to `log.matched` |
+
+A rule engine's `data` (the CRS's `logdata`) is hidden as the most hidden of the variables its
+chain matched in; a hit whose `matched` is hidden has its `data` hidden too. `REDACTED` keeps the
+key (`secret: hash` writes the hash of a token, never of a password). `log.matched` is this
+output's payload length; `log.matched: 0` drops `matched` and `data`.
 
 Each hit names the rule's `severity`, `tags`, and its `confidence` and `refs` (only the lists
 that are not empty) when it has them, so a SIEM selects by CWE, CVE or OWASP category without a
@@ -582,9 +607,9 @@ threshold), `access` (refused by `access`, with `reason`: `country`, `asn`, `ip`
 `honeypot`), `leak` (response phase), `challenge` (answered with the browser challenge; `status`
 503 or 302; `reason` `country`, `asn` or `ban` when `access` asked, none for a rule, whose `hits`
 are written), `challenge_passed` (a challenge was due and the client had passed it: let through,
-`status` 0). `matched` is cut to `log.matched` bytes and JSON-escaped;
-values of parameters the JWT check hides stay hidden. A refused request is also in the site's
-access log as any other.
+`status` 0). `matched` is cut to `log.matched` bytes and JSON-escaped, and hidden as its source
+says (Privacy, above). A refused request is also in the site's access log as any other, with the
+same `request.id`.
 
 ## Performance
 
@@ -656,7 +681,8 @@ crates/webfast-ngfw/src/
   iplist.rs     IpSet (prefix tries), IpLists (allow/deny/files/feeds under ArcSwap)
   ban.rs        Bans: counts per address in a window, bans for a duration, sweep
   multipart.rs  the parts of a multipart prefix: name, filename, type, head bytes
-  log.rs        the event lines (through webfast_core::eventlog)
+  log.rs        the event lines: their kinds and fields (through webfast_core::eventlog's events)
+  source.rs     where a hit's matched text came from, for the log policy (HitSource)
   plugin.rs     the rule engines of other crates: Factory, Engine, Found, register(); evaluate() for their tests
   rules/        the built-in sets, one YAML each, plus mod.rs with BUILTIN_VERSION and include_str!
 ```

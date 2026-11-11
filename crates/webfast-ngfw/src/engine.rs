@@ -13,6 +13,7 @@
 use super::body::BodyData;
 use super::compile::{Compiled, CompiledRule, Magic, Matcher, Plan};
 use super::rule::{Action, Measure, Mode, Phase, Target, Transform};
+use super::source::HitSource;
 use http::HeaderMap;
 use std::cell::RefCell;
 use std::io::Write as _;
@@ -219,8 +220,6 @@ pub struct Input<'a> {
     pub ja4: Option<webfast_core::ja4::Ja4>,
     pub body: Option<&'a BodyData>,
     pub response: Option<ResponseData<'a>>,
-    /// Query parameters whose values the log does not show (webfast_core::eventlog `HiddenParams`).
-    pub hidden: &'a [String],
 }
 
 /// Which plans of a phase run: all of them, or — for a streamed response (response.rs) — those
@@ -255,8 +254,12 @@ pub struct Hit {
     /// An engine's hit: the rule's words on the match (the CRS's `logdata`), cut to `log.matched`.
     pub data: Option<String>,
     pub target: String,
-    /// Cut to `log.matched` bytes; `REDACTED` for a hidden parameter.
+    /// Cut to `log.matched` bytes; the log shows it as its source lets it (src/source.rs).
     pub matched: String,
+    /// Where `matched` came from.
+    pub source: HitSource,
+    /// Where `data` may have taken its values from: the most hidden of a chain's variables.
+    pub data_source: HitSource,
 }
 
 /// What a phase's end decides.
@@ -365,6 +368,7 @@ impl Evaluation {
         target: &str,
         matched: String,
         data: Option<String>,
+        (source, data_source): (HitSource, HitSource),
         score: u32,
         verdict: super::plugin::Verdict,
         mode: Mode,
@@ -377,6 +381,8 @@ impl Evaluation {
             data,
             target: target.to_string(),
             matched,
+            source,
+            data_source,
         });
         let action = match verdict {
             Verdict::Score => Action::Score,
@@ -1115,16 +1121,15 @@ impl Evaluation {
             return;
         }
         self.set_matched(index, c.rules.len());
-        let hidden = name.is_some_and(|name| {
-            matches!(target, Target::Args | Target::Arg(_))
-                && input
-                    .hidden
-                    .iter()
-                    .any(|h| *h == percent_encoding::percent_decode_str(name).decode_utf8_lossy())
-        });
-        let matched = if hidden {
-            "REDACTED".to_string()
-        } else if matches!(rule.matcher, Matcher::DetectSqli) && log_matched > 0 {
+        let source = HitSource::of_target(
+            target,
+            name,
+            text,
+            range.clone(),
+            input.parts,
+            input.body.and_then(|b| b.json.as_ref()),
+        );
+        let matched = if matches!(rule.matcher, Matcher::DetectSqli) && log_matched > 0 {
             // libinjection's fingerprint before the value (`[s&sos] 1' or '1'='1`): what it saw.
             // Found again here, on a hit only.
             let fingerprint = super::detect::sqli(text);
@@ -1140,6 +1145,8 @@ impl Evaluation {
             data: None,
             target: target.to_string(),
             matched,
+            source,
+            data_source: HitSource::Payload,
         });
         if rule.action == Action::Header {
             self.header_rules.push(index);
@@ -2470,7 +2477,6 @@ pub(crate) mod tests {
             ja4: None,
             body: None,
             response: None,
-            hidden: &[],
         }
     }
 
@@ -2817,18 +2823,17 @@ rules:
     }
 
     #[test]
-    fn matched_text_is_cut_and_hidden_parameters_are_not_shown() {
+    fn matched_text_is_cut_and_keeps_its_source() {
         let c = compiled(RULES, Mode::Block);
         let parts = request(
             "/?access_token=sleep(1)&q=sleep(1234567890)",
             &[("user-agent", "Mozilla")],
         );
-        let hidden = ["access_token".to_string()];
-        let mut input = input(&parts);
-        input.hidden = &hidden;
+        let input = input(&parts);
         let mut eval = Evaluation::new();
         eval.run_phase(&c, Phase::Head, &input, 3);
-        assert_eq!(eval.hits[0].matched, "REDACTED");
+        // The log hides it by its source (src/log.rs), not the engine.
+        assert_eq!(eval.hits[0].source, HitSource::Arg("access_token".into()));
         let mut eval = Evaluation::new();
         let parts = request("/?q=sleep(1234567890)", &[("user-agent", "Mozilla")]);
         let input = super::tests::input(&parts);

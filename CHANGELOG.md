@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+The request filter's lines under webfast's log policy (webfast's docs/logging.md, step 3): a
+credential a rule matched in is no longer written.
+
+Worth knowing when upgrading:
+
+- Needs a webfast with the log policy (its `log_policy`, 0.1.7).
+- A hit's `matched` (and an engine's `data`) is `REDACTED` where it came from a secret: a token's
+  query parameter, `Authorization` or another secret header, a cookie, a password field, a query
+  string, `Referer` or JSON body that carries one, a raw body. Before, only the JWT check's
+  parameters were hidden. Rules, targets and the decision are as they were.
+- `request.id` in every line, the access log's id for the same request.
+- `log.privacy` (`{ personal: hash, payload: drop, secret: hash }`) over the global policy;
+  `log.matched: 0` drops `matched` and `data` rather than writing them empty.
+- For code that uses the crate: `Ngfw::hide_params` and `engine::Input::hidden` are gone (the
+  policy holds the JWT's parameters); `engine::Hit` has `source` and `data_source`
+  (`source::HitSource`); a rule engine's `plugin::EngineHit` has `chain` (the variables its
+  chain matched in) in place of `param`.
+
+### Changes
+
+- `log.rs`: the lines as events of declared kinds (`EventKind`, fields with their classes),
+  through `EventLog::event_with`; the test marker's line too.
+- `source.rs`: a hit's source from its target (built-in rules) or SecLang variable (an engine's),
+  a composite one classed where the match is found.
+- The response phase's line has the request's id.
+- tests/privacy.rs: requests with a token, `Authorization`, a cookie, a `Referer`, a form's and a
+  JSON body's password, each matched by a rule; none is in a line.
+
 ## 0.1.3 — 2026-11-11
 
 The OWASP Core Rule Set v4 inside the request filter: a new crate, `webfast-ngfw-crs`, reads the

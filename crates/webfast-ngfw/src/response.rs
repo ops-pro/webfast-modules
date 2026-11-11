@@ -37,9 +37,9 @@ use std::pin::Pin;
 use std::sync::{Arc, LazyLock};
 use std::task::{Context, Poll};
 use webfast_core::body::{Body, BoxError};
-use webfast_core::eventlog::HiddenParams;
 use webfast_core::handler::Ctx;
 use webfast_core::module::Inspect;
+use webfast_core::reqid::RequestId;
 
 /// Bytes before (carried from the frames before) and after a frame boundary that a streamed
 /// response's regex rules see across it; a match of at most this length is found wherever the
@@ -138,7 +138,6 @@ impl super::Ngfw {
             }
         };
         let text = String::from_utf8_lossy(&prefix.bytes);
-        let hidden = self.hidden.load_full();
         let input = Input {
             parts: &ctx.req,
             client_ip: ip,
@@ -152,7 +151,6 @@ impl super::Ngfw {
                 headers: &parts.headers,
                 body: &text,
             }),
-            hidden: &hidden,
         };
         evaluation.run_phase(&state.compiled, Phase::Response, &input, state.log_matched);
         let Some(outcome) = leaks(evaluation.decision(state.threshold)) else {
@@ -187,7 +185,6 @@ impl super::Ngfw {
         body: Body,
     ) -> Result<Body, Response<Body>> {
         let ip = ctx.client_ip;
-        let hidden = self.hidden.load_full();
         let status = parts.status.as_u16();
         let input = Input {
             parts: &ctx.req,
@@ -202,7 +199,6 @@ impl super::Ngfw {
                 headers: &parts.headers,
                 body: "",
             }),
-            hidden: &hidden,
         };
         evaluation.run_response(&state.compiled, &input, state.log_matched, Plans::ResponseHead);
         let decision = evaluation.decision(state.threshold);
@@ -268,7 +264,8 @@ struct Request {
     uri: Uri,
     host: Option<HeaderValue>,
     user_agent: Option<HeaderValue>,
-    hidden: Option<HiddenParams>,
+    /// The request's id (webfast_core::reqid), the same in the line as in the access log's.
+    id: Option<RequestId>,
 }
 
 impl Request {
@@ -278,7 +275,7 @@ impl Request {
             uri: parts.uri.clone(),
             host: parts.headers.get(http::header::HOST).cloned(),
             user_agent: parts.headers.get(http::header::USER_AGENT).cloned(),
-            hidden: parts.extensions.get::<HiddenParams>().cloned(),
+            id: parts.extensions.get::<RequestId>().cloned(),
         }
     }
 
@@ -293,8 +290,8 @@ impl Request {
         if let Some(user_agent) = &self.user_agent {
             parts.headers.insert(http::header::USER_AGENT, user_agent.clone());
         }
-        if let Some(hidden) = &self.hidden {
-            parts.extensions.insert(hidden.clone());
+        if let Some(id) = &self.id {
+            parts.extensions.insert(id.clone());
         }
         parts
     }
@@ -396,7 +393,6 @@ fn run(evaluation: &mut Evaluation, state: &State, status: u16, ip: IpAddr, text
             headers: &headers,
             body: text,
         }),
-        hidden: &[],
     };
     evaluation.run_response(&state.compiled, &input, state.log_matched, Plans::ResponseBody);
     match evaluation.decision(state.threshold) {

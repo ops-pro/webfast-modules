@@ -226,7 +226,6 @@ fn crs_regression() {
                     ja4: None,
                     body: data.as_ref(),
                     response: None,
-                    hidden: &[],
                 };
                 let evaluation = webfast_ngfw::plugin::evaluate(
                     &crs,

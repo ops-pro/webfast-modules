@@ -48,9 +48,14 @@ fn five() -> u32 {
 pub struct LogConfig {
     /// `stdout`, `stderr`, `discard`, or a file relative to this file.
     pub output: String,
-    /// Bytes of the matched text written per hit; 0: none.
+    /// Bytes of the matched text written per hit; 0: none. The payload's length of this output
+    /// (webfast's log policy, docs/logging.md): `privacy`'s `payload: show <n>` over it.
     #[serde(default = "two_hundred")]
     pub matched: usize,
+    /// What this output shows of each class over the global `log_policy`:
+    /// `{ personal: hash, payload: drop, secret: hash }`.
+    #[serde(default)]
+    pub privacy: webfast_core::privacy::Overrides,
     /// Also write requests let through with hits: scored under the threshold, or hits that only
     /// log (`action: log`, an engine's detection-only rules).
     #[serde(default)]
@@ -63,6 +68,21 @@ pub struct LogConfig {
 
 fn two_hundred() -> usize {
     200
+}
+
+impl LogConfig {
+    /// The output's privacy: `privacy` over the policy's, with `matched` for the payload's
+    /// length unless `privacy` gives one (`matched: 0` drops the payload).
+    pub fn overrides(&self) -> webfast_core::privacy::Overrides {
+        let mut out = self.privacy;
+        if out.payload_len.is_none() {
+            out.payload_len = Some(self.matched);
+            if self.matched == 0 && out.payload.is_none() {
+                out.payload = Some(webfast_core::privacy::Action::Drop);
+            }
+        }
+        out
+    }
 }
 
 #[derive(Deserialize, Debug, Clone)]

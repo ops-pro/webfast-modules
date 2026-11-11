@@ -720,7 +720,6 @@ fn the_examples_on_the_connection_hold() {
                     ja4: Some(ja4),
                     body: None,
                     response: None,
-                    hidden: &[],
                 };
                 let mut evaluation = Evaluation::new();
                 evaluation.run_phase(&compiled, Phase::Connection, &input, 200);

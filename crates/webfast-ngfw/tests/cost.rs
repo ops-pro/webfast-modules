@@ -81,7 +81,6 @@ fn head(compiled: &Compiled, parts: &http::request::Parts) -> Decision {
         ja4: None,
         body: None,
         response: None,
-        hidden: &[],
     };
     let mut evaluation = Evaluation::new();
     evaluation.run_phase(compiled, Phase::Connection, &input, 200);

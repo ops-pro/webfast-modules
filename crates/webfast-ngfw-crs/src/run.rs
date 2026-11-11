@@ -620,6 +620,10 @@ pub fn run(program: &Program, phase: usize, tx: &mut Tx, found: &mut Found<'_>) 
         let scores = rule.links.iter().any(|l| !l.setvars.is_empty());
         let before = if scores { tx.score() } else { 0 };
         let mut first: Option<(String, Vec<u8>)> = None;
+        // Every variable the chain matched in, for the log's classing of `logdata` (it may carry
+        // any of their values): only for a rule that has one.
+        let has_data = !rule.logdata.pieces.is_empty();
+        let mut chain: Vec<String> = Vec::new();
         let mut matched = true;
         for (k, link) in rule.links.iter().enumerate() {
             // A regex none of whose literals any of the values it reads has: no match, the values
@@ -641,6 +645,11 @@ pub fn run(program: &Program, phase: usize, tx: &mut Tx, found: &mut Found<'_>) 
                             m.value.clone()
                         };
                         first = Some((m.name.clone(), shown));
+                    }
+                    for m in matches.iter().filter(|_| has_data) {
+                        if !chain.contains(&m.name) {
+                            chain.push(m.name.clone());
+                        }
                     }
                     apply(tx, link, &matches);
                 }
@@ -669,17 +678,13 @@ pub fn run(program: &Program, phase: usize, tx: &mut Tx, found: &mut Found<'_>) 
                 (verdict, score)
             };
             let (target, value) = first.unwrap_or_default();
-            let param = target
-                .strip_prefix("ARGS:")
-                .or_else(|| target.strip_prefix("ARGS_GET:"))
-                .or_else(|| target.strip_prefix("ARGS_POST:"));
             // `logdata` as ModSecurity expands it, at the chain's end.
             let data = (!rule.logdata.pieces.is_empty())
                 .then(|| String::from_utf8_lossy(&rule.logdata.expand(&mut |c, k| resolve(tx, c, k))).into_owned());
             found.hit(EngineHit {
                 rule: &rule.info,
                 target: &target,
-                param,
+                chain: &chain,
                 matched: &String::from_utf8_lossy(&value),
                 data: data.as_deref(),
                 score,

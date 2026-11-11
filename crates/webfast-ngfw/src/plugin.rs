@@ -11,6 +11,7 @@
 
 use super::engine::{Evaluation, Input};
 use super::rule::{Phase, Severity};
+use super::source::HitSource;
 use anyhow::Result;
 use std::any::Any;
 use std::path::Path;
@@ -72,10 +73,12 @@ pub enum Verdict {
 /// One rule of an engine that matched.
 pub struct EngineHit<'a> {
     pub rule: &'a Arc<EngineRule>,
-    /// What it matched in: `ARGS:q`, `REQUEST_HEADERS:user-agent`.
+    /// What it matched in: `ARGS:q`, `REQUEST_HEADERS:user-agent` (SecLang's names: the log
+    /// classes the matched text by it, src/source.rs).
     pub target: &'a str,
-    /// The parameter's name, for a value the JWT check hides from the logs.
-    pub param: Option<&'a str>,
+    /// The variables the other links of a chain matched in (`data` may carry their values): the
+    /// log hides `data` as the most hidden of them and `target`.
+    pub chain: &'a [String],
     /// What matched.
     pub matched: &'a str,
     /// The rule's own words on the match (the CRS's `logdata`), if any.
@@ -89,33 +92,35 @@ pub struct EngineHit<'a> {
 pub struct Found<'a> {
     pub(crate) evaluation: &'a mut Evaluation,
     pub(crate) log_matched: usize,
-    pub(crate) hidden: &'a [String],
+    /// The request: what a source is worked out from (its URI, its `Referer`).
+    pub(crate) parts: &'a http::request::Parts,
     /// The file's `mode`: how a hit counts.
     pub(crate) mode: super::rule::Mode,
 }
 
 impl Found<'_> {
     /// One rule matched: written with the request, counted under the file's `mode`. The matched
-    /// text and the data are cut to `log.matched` (none with 0); a hidden parameter's are not
-    /// shown.
+    /// text and the data are cut to `log.matched` (none with 0), and shown as their sources let
+    /// them (src/source.rs).
     pub fn hit(&mut self, hit: EngineHit<'_>) {
-        let hidden = hit.param.is_some_and(|name| self.hidden.iter().any(|h| h == name));
-        let matched = if hidden {
-            "REDACTED".to_string()
-        } else {
-            super::engine::cut(hit.matched, self.log_matched).to_string()
-        };
+        let matched = super::engine::cut(hit.matched, self.log_matched).to_string();
         let data = match hit.data {
-            Some(d) if !hidden && self.log_matched > 0 && !d.is_empty() => {
+            Some(d) if self.log_matched > 0 && !d.is_empty() => {
                 Some(super::engine::cut(d, self.log_matched).to_string())
             }
             _ => None,
         };
+        let policy = webfast_core::privacy::policy();
+        let source = HitSource::of_seclang(hit.target, self.parts, &policy);
+        let data_source = hit.chain.iter().fold(source.clone(), |most, variable| {
+            most.most_hidden(HitSource::of_seclang(variable, self.parts, &policy), &policy)
+        });
         self.evaluation.engine_hit(
             Arc::clone(hit.rule),
             hit.target,
             matched,
             data,
+            (source, data_source),
             hit.score,
             hit.verdict,
             self.mode,
@@ -228,7 +233,7 @@ pub fn evaluate(engine: &dyn Engine, phases: &[(Phase, &Input<'_>)], mode: super
         let mut found = Found {
             evaluation: &mut evaluation,
             log_matched: 200,
-            hidden: input.hidden,
+            parts: input.parts,
             mode,
         };
         engine.run(*phase, input, &mut state, &mut found);

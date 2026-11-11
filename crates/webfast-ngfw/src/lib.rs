@@ -49,6 +49,7 @@ pub mod plugin;
 pub mod response;
 pub mod rule;
 pub mod rules;
+pub mod source;
 
 use anyhow::{Context, Result, bail};
 use arc_swap::{ArcSwap, ArcSwapOption};
@@ -153,9 +154,6 @@ pub struct Ngfw {
     /// The file, for a reload; `None` for one loaded from text.
     path: Option<PathBuf>,
     state: ArcSwap<State>,
-    /// Query parameters the JWT check hides from the logs, told after both are loaded: a slice
-    /// shared as it is with every request (`HiddenParams`), made once.
-    hidden: ArcSwap<Arc<[String]>>,
 }
 
 /// The running instance, for a reload (`Module::reload` has no configuration to find it in): set
@@ -177,7 +175,6 @@ pub struct Pending {
     state: Arc<State>,
     evaluation: Evaluation,
     geo: Peer,
-    hidden: Arc<[String]>,
     kind: body::Kind,
 }
 
@@ -208,8 +205,6 @@ impl Module for NgfwModule {
             loaded.push(format!("NGFW: {path}, {first}"));
         }
         loaded.extend(lines.map(|line| format!("NGFW: {line}")));
-        // The module logs before the JWT check runs: told which parameters to hide.
-        ngfw.hide_params(config.hidden_params.clone());
         config.modules.insert(Arc::new(ngfw));
         Ok(loaded)
     }
@@ -408,12 +403,13 @@ impl State {
         }
         let bans = Bans::new(&ban).context("access.ban")?;
         let lists = IpLists::new(&access.ip, base).context("access.ip")?;
-        let log = webfast_core::eventlog::EventLog::new(
+        let log = webfast_core::eventlog::EventLog::of_check(
             "ngfw",
             file.log
                 .as_ref()
-                .map(|l| webfast_core::eventlog::LogConfig {
+                .map(|l| webfast_core::eventlog::CheckLog {
                     output: l.output.clone(),
+                    privacy: l.overrides(),
                 })
                 .as_ref(),
             base,
@@ -429,7 +425,14 @@ impl State {
             response_stream: file.response.stream,
             response_carry: compiled.response_carry(response::WINDOW),
             log,
-            log_matched: file.log.as_ref().map_or(200, |l| l.matched),
+            // What the engine keeps of a match: as much as the output may show.
+            log_matched: file.log.as_ref().map_or(200, |l| {
+                let privacy = l.overrides();
+                match privacy.payload {
+                    Some(webfast_core::privacy::Action::Drop) => 0,
+                    _ => privacy.payload_len.unwrap_or(200),
+                }
+            }),
             log_passed: file.log.as_ref().is_some_and(|l| l.passed),
             test_marker,
             compiled,
@@ -509,7 +512,7 @@ impl State {
             let mut found = plugin::Found {
                 evaluation,
                 log_matched: self.log_matched,
-                hidden: input.hidden,
+                parts: input.parts,
                 mode: self.mode,
             };
             loaded.engine.run(phase, input, state, &mut found);
@@ -556,7 +559,6 @@ impl Ngfw {
         Ok(Ngfw {
             path: Some(path.to_path_buf()),
             state: ArcSwap::from_pointee(state),
-            hidden: ArcSwap::from_pointee(Arc::from(Vec::new())),
         })
     }
 
@@ -566,7 +568,6 @@ impl Ngfw {
         Ok(Ngfw {
             path: None,
             state: ArcSwap::from_pointee(state),
-            hidden: ArcSwap::from_pointee(Arc::from(Vec::new())),
         })
     }
 
@@ -581,11 +582,6 @@ impl Ngfw {
             .with_context(|| format!("NGFW configuration {}", path.display()))?;
         self.state.store(Arc::new(state));
         Ok(())
-    }
-
-    /// Query parameters whose values the logs do not show (the JWT check's `from_params`).
-    pub fn hide_params(&self, names: Vec<String>) {
-        self.hidden.store(Arc::new(Arc::from(names)));
     }
 
     /// Rules, sets (for the startup log).
@@ -878,15 +874,7 @@ impl Ngfw {
             // go-ftw's marker (log.test_marker): its value in a line of its own; the request is
             // checked as any other.
             let value = value.to_str().unwrap_or("");
-            state
-                .log
-                .record_with("info", "test marker", client.ip, parts, &|_| {}, &|line| {
-                    line.push_str(r#","marker_header":""#);
-                    webfast_core::accesslog::json_escape(line, name.as_str());
-                    line.push_str(r#"","marker":""#);
-                    webfast_core::accesslog::json_escape(line, value);
-                    line.push('"');
-                });
+            log::marker(&state.log, parts, client.ip, name.as_str(), value);
         }
         let compiled = &state.compiled;
         // The headers of `header` actions are the module's to set.
@@ -895,13 +883,6 @@ impl Ngfw {
         }
         if !compiled.header_names.is_empty() {
             webfast_core::proxy::remove_lookalikes(&mut parts.headers, &compiled.header_names);
-        }
-        // Reference counts only: the slice is made when the names are told.
-        let hidden: Arc<[String]> = Arc::clone(&self.hidden.load());
-        if !hidden.is_empty() && parts.extensions.get::<webfast_core::eventlog::HiddenParams>().is_none() {
-            parts
-                .extensions
-                .insert(webfast_core::eventlog::HiddenParams(Arc::clone(&hidden)));
         }
         let ip = client.ip;
         let geo = Peer {
@@ -998,7 +979,6 @@ impl Ngfw {
                 sni: client.conn.sni.as_deref(),
                 body: None,
                 response: None,
-                hidden: &hidden,
             };
             evaluation.run_phase(compiled, Phase::Connection, &input, state.log_matched);
             if !matches!(evaluation.decision(state.threshold), Decision::Pass) {
@@ -1034,7 +1014,6 @@ impl Ngfw {
                 state,
                 evaluation,
                 geo,
-                hidden,
                 kind,
             }),
             None => {
@@ -1058,7 +1037,6 @@ impl Ngfw {
             state,
             mut evaluation,
             geo,
-            hidden,
             kind,
         } = pending;
         let compiled = &state.compiled;
@@ -1082,7 +1060,6 @@ impl Ngfw {
             sni: client.conn.sni.as_deref(),
             body: Some(&data),
             response: None,
-            hidden: &hidden,
         };
         evaluation.run_phase(compiled, Phase::Body, &input, state.log_matched);
         if multipart && !matches!(evaluation.decision(state.threshold), Decision::Pass) {
