@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.4 — 2026-11-11
 
 The request filter's lines under webfast's log policy (webfast's docs/logging.md, step 3): a
 credential a rule matched in is no longer written.

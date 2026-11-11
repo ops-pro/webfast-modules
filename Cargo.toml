@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/webfast-ngfw", "crates/webfast-ngfw-crs", "crates/webfast-challenge"]
 
 [workspace.package]
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
 # The same minimum as webfast-core's (let chains: 1.88; serde-saphyr: 1.89).
 rust-version = "1.89"
