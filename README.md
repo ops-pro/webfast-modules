@@ -11,12 +11,11 @@ proxied responses, its state loaded from its own files. The crates reach the cor
 through its composition (`crates/webfast/src/compose.rs` there), where the order of the hooks is
 fixed at compile time.
 
-```
-crates/webfast-ngfw         the NGFW request filter     webfast_ngfw::MODULE, Ngfw, response::NgfwResponses
-crates/webfast-ngfw-crs     the OWASP CRS in the filter webfast_ngfw_crs::ENGINE (a rule engine of the filter)
-crates/webfast-challenge    the browser challenge       webfast_challenge::MODULE, ChallengeEndpoint, Asking, Level
-docs/ngfw.md, docs/ngfw-crs.md, docs/challenge.md
-```
+| Crate | What it is | What webfast composes | webfast's feature | Documentation |
+| --- | --- | --- | --- | --- |
+| [`crates/webfast-ngfw`](crates/webfast-ngfw) | the NGFW request filter | `webfast_ngfw::MODULE`, `Ngfw`, `response::NgfwResponses` | `ngfw` (default) | [docs/ngfw.md](docs/ngfw.md), [rules](docs/ngfw-rules.md) |
+| [`crates/webfast-ngfw-crs`](crates/webfast-ngfw-crs) | the OWASP CRS in the filter | `webfast_ngfw_crs::ENGINE`, a rule engine of the filter | `ngfw-crs` | [docs/ngfw-crs.md](docs/ngfw-crs.md) |
+| [`crates/webfast-challenge`](crates/webfast-challenge) | the browser challenge | `webfast_challenge::MODULE`, `ChallengeEndpoint`, `Asking`, `Level` | `challenge` (default) | [docs/challenge.md](docs/challenge.md) |
 
 ## The request filter: `webfast-ngfw`
 

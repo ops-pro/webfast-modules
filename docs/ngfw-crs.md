@@ -112,6 +112,65 @@ ModSecurity's PCRE reads bytes): every `@rx` of the CRS 4 compiles so, as the CR
 regexes for RE2 and Hyperscan too. A site's regex with a backreference or a lookaround does not
 load.
 
+## Compared with ModSecurity, Coraza and CrowdSec
+
+**The rules are the same.** The bundled files are the release's, byte for byte (crs/rules
+against the release's rules/); ModSecurity and Coraza load the same files, and CrowdSec's AppSec
+runs the CRS (its `crowdsecurity/crs` collection, at a version of its own) through an embedded
+Coraza. Rule ids, messages, severities and scores are the CRS's.
+
+**What is not loaded:**
+
+- `REQUEST-949` and `RESPONSE-959`, the blocking evaluation: the filter's `threshold` decides (5 by
+  default, as the CRS's `inbound_anomaly_score_threshold`).
+- The response rules, `RESPONSE-950` to `956`, and the correlation, `RESPONSE-980` (see below).
+- `crs-setup.conf` and the `*.example` exclusion files: `engines.crs.tx`, `before` and `after`
+  take their place, and the CRS's initialization (901) gives the defaults.
+
+**What behaves otherwise, the rules being the same:**
+
+- The interpreter is this crate's, not ModSecurity's or Coraza's; the CRS's regression tests are
+  what show it reads the rules as they do ("How close it is").
+- The decision is taken at the end of the head and at the end of the body, where the CRS decides
+  at the end of phase 2 by default: the CRS's `early_blocking`. A head over the threshold is
+  refused before its body is read.
+- webfast's HTTP/1 parser refuses a raw `<`, `>`, `"`, `[` or `]` in the request target (400)
+  before any check, where httpd lets it through to ModSecurity.
+- Regexes are the regex crate's, not PCRE: the CRS's compile (it writes them for RE2 too), a
+  site's with a backreference or a lookaround does not.
+- XML bodies are read for their text and their attributes' values (`XML:/*`, `XML://@*`), with no
+  other XPath.
+- There are no persistent collections (`IP`, `SESSION`, …); the CRS 4's request rules do not need
+  them.
+- The log is the filter's JSON line, header names in lower case, not ModSecurity's
+  `[id "…"] [msg "…"]` text.
+- CrowdSec runs the CRS beside virtual patches of its own; the filter's `cve` set is that here,
+  on beside the CRS.
+
+**The response rules and the correlation**, and why they are not here yet:
+
+- *Correlation (`RESPONSE-980`)* is of no use here: in the CRS 4 it is phase 5 rules that write a
+  summary of the inbound and outbound scores and the rules that hit, refusing nothing. The
+  filter's line has the scores, the threshold and every hit already.
+- *Leaks (`RESPONSE-950` to `954`)*: SQL, Java, PHP and IIS error text, directory listings, in a
+  response. Nearly what the filter's built-in `leakage` set does, which does more: it reads a
+  response as it streams and cuts it at a leak, and replaces a 5xx before the cache keeps it.
+- *Web shells (`RESPONSE-955`)* is the one of them a site would miss: it knows a known web shell's
+  page in a response — a sign the server is compromised, not of an attempt. `RESPONSE-956` (Ruby
+  errors) is narrow.
+- What they would cost: some hundred regexes over the start of each proxied response's body (64
+  KiB), where many ModSecurity and Coraza deployments turn the response analysis off
+  (`tx.crs_skip_response_analysis`) for the CPU and for pages that show error text as content
+  (documentation, forums, issue trackers). And the CRS reads a response whole, where the filter's
+  response phase streams: they would run on a held response, or on windows of it and miss matches
+  across a window's edge.
+- So they would be an option, off by default, the web shells first.
+
+**Responses with the CRS on, as things are:** `rules.builtin` left out means `cve` alone, so the
+`leakage` set is off too and no response is looked at. A site that wants leaks found names both,
+`rules.builtin: [cve, leakage]`: the leakage rules' numbers are the CRS's response rules', which
+are not loaded, so nothing collides.
+
 ## How close it is
 
 **The CRS's own regression tests** (go-ftw, the release's tests/regression/tests: 5231 tests),
@@ -134,11 +193,17 @@ The same tests run in process (`crs_regression` in src/regression.rs, for work o
 the three left are httpd's answers above.
 
 **What it costs**, on one core of the machine this was written on (`cost` in src/tests.rs):
-the CRS's two request phases over a browser's GET, some 330 µs at paranoia 1 and 750 µs at
-paranoia 4; over a small form POST, 440 µs and 880 µs. That is the order of ModSecurity's and
-Coraza's own, and two orders over the built-in sets' (a few µs): every rule runs its
-transformations and its regex over every value of its variables, as ModSecurity does. A
-prefilter by the regexes' required literals, as the built-in engine has, is the way down.
+the CRS's two request phases over a browser's GET, some 200 µs at paranoia 1 and 350 µs at
+paranoia 4; over a small form POST, 260 µs and 470 µs. Every rule still runs in its order, as
+ModSecurity's, but a request's values are worked once per chain of transformations: transformed
+(a transformation that would give the value back as it is, not run), then one pass of the chain's
+automaton over the literals every match of each of its regexes starts with (regex-syntax's prefix
+literals). A regex none of whose literals any value it reads has fails at once, its values not
+gathered; one that may match runs on the values that have them. `TX` is a hash map read by key,
+and the anomaly score is looked at only around a rule that sets variables. That is the order of
+ModSecurity's and Coraza's own, and still two orders over the built-in sets' (a few µs): the CRS
+has some 250 rules to run at paranoia 1, 430 at 4, the most of them comparisons of its own
+variables.
 
 ## Updating the CRS
 
