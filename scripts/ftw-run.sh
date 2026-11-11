@@ -33,30 +33,34 @@ export FTW_OUT
 passes=("$@")
 [ ${#passes[@]} -gt 0 ] || passes=(all cve)
 
-# The CRS's regression tests of the release bundled (crates/webfast-ngfw-crs/src/lib.rs).
+# The CRS's regression tests of the release bundled (crates/webfast-ngfw-crs/src/lib.rs), as
+# CRS_TESTS_MOUNT for the compose file: CRS_TESTS, or fetched into crs-tests.
 crs_tests() {
   if [ -n "${CRS_TESTS:-}" ]; then
-    CRS_TESTS=$(realpath "$CRS_TESTS") || return 1
-    export CRS_TESTS
+    CRS_TESTS_MOUNT=$(realpath "$CRS_TESTS") || return 1
+    export CRS_TESTS_MOUNT
     return 0
   fi
   local version sum
   version=$(sed -n 's/^pub const CRS_VERSION: &str = "\(.*\)";/\1/p' ../../crates/webfast-ngfw-crs/src/lib.rs)
   sum=a4bb3688ef6205b64471a9ccbf0d7b024eb8edf39b97c6f6c0006e7a948f8550
   [ "$version" = 4.30.0 ] || { echo "the checksum here is 4.30.0's, the crate bundles $version" >&2; return 1; }
-  if [ ! -d crs-tests ]; then
+  # Fetched once: a directory with the tests in it (not one that is merely there).
+  if [ -z "$(find crs-tests -name '*.yaml' -print -quit 2>/dev/null)" ]; then
     curl -fsSL -o crs.tar.gz "https://github.com/coreruleset/coreruleset/archive/refs/tags/v$version.tar.gz" || return 1
     echo "$sum  crs.tar.gz" | sha256sum -c - >/dev/null || { echo "crs.tar.gz: not the release's checksum" >&2; return 1; }
     mkdir -p crs-tests
     tar -xzf crs.tar.gz -C crs-tests --strip-components=4 "coreruleset-$version/tests/regression/tests" || return 1
     rm -f crs.tar.gz
   fi
-  CRS_TESTS=$(realpath crs-tests)
-  export CRS_TESTS
+  [ -n "$(find crs-tests -name '*.yaml' -print -quit)" ] || { echo "crs-tests: no tests in the release" >&2; return 1; }
+  CRS_TESTS_MOUNT=$(realpath crs-tests)
+  export CRS_TESTS_MOUNT
 }
 failed=()
 for pass in "${passes[@]}"; do
   exclude=()
+  unset CRS_TESTS_MOUNT
   case "$pass" in
     all) dir=/tests ;;
     cve) dir=/tests/rules/cve ;;

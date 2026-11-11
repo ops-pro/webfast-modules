@@ -43,8 +43,10 @@ services:
       - ./ftw-all.yaml:/ftw-all.yaml:ro
       - ./ftw-cve.yaml:/ftw-cve.yaml:ro
       - ./ftw-crs.yaml:/ftw-crs.yaml:ro
-      # The CRS's regression tests, for the crs pass (scripts/ftw-run.sh fetches them).
-      - ${CRS_TESTS:-./crs-tests}:/crs-tests:ro
+      # The CRS's regression tests, for the crs pass (scripts/ftw-run.sh fetches them and sets
+      # CRS_TESTS_MOUNT); another pass mounts this directory, which is there, rather than a path
+      # Docker would make (empty, and the fetch would take it for done).
+      - ${CRS_TESTS_MOUNT:-.}:/crs-tests:ro
       - logs:/var/log/web:ro
       - ${FTW_OUT:-./out}:/out
 
