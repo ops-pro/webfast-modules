@@ -1682,6 +1682,8 @@ dependencies = [
  "ipnet",
  "memchr",
  "regex",
+ "regex-syntax",
+ "rustc-hash",
  "serde",
  "serde_json",
  "tempfile",

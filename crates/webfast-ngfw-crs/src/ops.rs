@@ -43,6 +43,11 @@ pub struct Operator {
     pub negated: bool,
     /// The argument; a macro when it has `%{…}` (expanded per request).
     pub arg: Macro,
+    /// The argument's text when it has no macro, made once.
+    pub fixed_arg: Option<Vec<u8>>,
+    /// `@rx`: literals one of which every match starts with (ASCII lower case, the prefilter's;
+    /// none when the regex gives no finite set).
+    pub literals: Option<Vec<Vec<u8>>>,
     compiled: Compiled,
 }
 
@@ -98,6 +103,35 @@ fn bytes_escapes(pattern: &str) -> String {
         }
     }
     out
+}
+
+/// The literals every match of `pattern` (as `regex` builds it, Unicode off) starts with, in
+/// ASCII lower case, deduplicated; `None` when there is no finite set of them, one is empty (a
+/// match may start anywhere), or the pattern needs Unicode.
+pub fn prefix_literals(pattern: &str) -> Option<Vec<Vec<u8>>> {
+    use regex_syntax::hir::literal::{ExtractKind, Extractor};
+    let hir = regex_syntax::ParserBuilder::new()
+        .unicode(false)
+        .utf8(false)
+        .build()
+        .parse(&bytes_escapes(pattern))
+        .ok()?;
+    let mut extractor = Extractor::new();
+    extractor
+        .kind(ExtractKind::Prefix)
+        .limit_class(64)
+        .limit_repeat(8)
+        .limit_literal_len(12)
+        .limit_total(4096);
+    let seq = extractor.extract(&hir);
+    let literals = seq.literals()?;
+    if literals.is_empty() || literals.iter().any(|l| l.as_bytes().is_empty()) {
+        return None;
+    }
+    let mut out: Vec<Vec<u8>> = literals.iter().map(|l| l.as_bytes().to_ascii_lowercase()).collect();
+    out.sort();
+    out.dedup();
+    Some(out)
 }
 
 /// A regex as ModSecurity's PCRE reads it: on bytes, without Unicode where the pattern allows.
@@ -206,10 +240,20 @@ impl Operator {
             Kind::DetectSqli | Kind::DetectXss | Kind::UnconditionalMatch | Kind::NoMatch => Compiled::None,
             _ => Compiled::None,
         };
+        let fixed_arg = (!macro_arg.is_dynamic()).then(|| macro_arg.fixed().unwrap_or_default().into_bytes());
+        // A prefilter only for a regex that builds without Unicode, as the literals are read so.
+        let literals = match (&compiled, kind) {
+            (Compiled::Regex(_), Kind::Rx) if RegexBuilder::new(&bytes_escapes(arg)).unicode(false).build().is_ok() => {
+                prefix_literals(arg)
+            }
+            _ => None,
+        };
         Ok(Operator {
             kind,
             negated,
             arg: macro_arg,
+            fixed_arg,
+            literals,
             compiled,
         })
     }
@@ -223,7 +267,12 @@ impl Operator {
                 let Compiled::Regex(re) = &self.compiled else {
                     return false;
                 };
+                // The groups only for a value that matches: `is_match` runs the fast automata,
+                // `captures` the slower engines that track groups.
                 if want_captures {
+                    if !re.is_match(value) {
+                        return false;
+                    }
                     match re.captures(value) {
                         Some(caps) => {
                             for i in 0..caps.len().min(10) {
@@ -478,5 +527,23 @@ mod tests {
         let re = regex(r"\x{bc}[^>\x{be}]*[>\x{be}]", false).unwrap();
         assert!(re.is_match(b"\xbcscript\xbe"));
         assert_eq!(bytes_escapes(r"a\x{41}\\x{42}\x{100}"), r"a\x41\\x{42}\x{100}");
+    }
+
+    /// The prefilter's literals: what every match starts with, lower case; none for a regex a
+    /// match of which may start anywhere.
+    #[test]
+    fn prefix_literals_of_regexes() {
+        // Case folded to lower: `SlEeP(` is found by `sleep(`.
+        let words = prefix_literals("(?i)(?:sleep|benchmark)\\s*\\(").unwrap();
+        assert!(words.contains(&b"sleep(".to_vec()) && words.contains(&b"benchmark ".to_vec()));
+        assert!(
+            words
+                .iter()
+                .all(|l| l.starts_with(b"sleep") || l.starts_with(b"benchmark"))
+        );
+        let short = prefix_literals("[;|&]\\s*cat").unwrap();
+        assert!(short.iter().any(|l| l.starts_with(b";")) && short.iter().any(|l| l.starts_with(b"&")));
+        assert_eq!(prefix_literals("x?y?"), None, "a match may be empty");
+        assert_eq!(prefix_literals(".*x"), None);
     }
 }

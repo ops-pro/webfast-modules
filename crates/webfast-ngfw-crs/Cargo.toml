@@ -25,6 +25,10 @@ webfast-ngfw = { path = "../webfast-ngfw", version = "0.1", default-features = f
 # (libinjection, as the CRS's 942100 and 941100 ask), the byte searches.
 regex.workspace = true
 aho-corasick.workspace = true
+# The literals every match of an @rx starts with, for the prefilter (program.rs).
+regex-syntax.workspace = true
+# The request's cache of transformed values (run.rs).
+rustc-hash.workspace = true
 ipnet.workspace = true
 barbacane-libinjection.workspace = true
 memchr.workspace = true

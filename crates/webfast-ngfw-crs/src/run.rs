@@ -8,11 +8,17 @@
 //! (`tx.inbound_anomaly_score_pl1`… up to `tx.blocking_paranoia_level`) is its hit's score in the
 //! filter's evaluation: the filter's threshold decides, not the CRS's blocking rules (949), which
 //! are not loaded. A rule above the blocking level (detection only) is written with no score.
+//!
+//! What a request's values cost is paid once per value and chain of transformations: the value
+//! transformed, then one pass of the chain's automaton over it for the literals of the regexes run
+//! after that chain (`Program::chains`), kept for the request (`Tx::transformed`). A regex whose
+//! literals the value has none of does not run; most do not.
 
 use super::program::{Collection, Ctl, Disruptive, Item, Link, Program, Rule, SetOp, Var, in_ranges};
 use super::request::{Pair, Request};
+use rustc_hash::FxHashMap;
 use std::borrow::Cow;
-use std::collections::BTreeMap;
+use std::cell::RefCell;
 use webfast_ngfw::plugin::{EngineHit, Found, Verdict};
 
 /// Rule ids, as `first-last` ranges.
@@ -22,7 +28,7 @@ type Ranges = Vec<(u32, u32)>;
 pub struct Tx {
     pub req: Request,
     /// `TX`, keys in lower case.
-    pub vars: BTreeMap<String, Vec<u8>>,
+    pub vars: FxHashMap<String, Vec<u8>>,
     /// `MATCHED_VARS`: the last link's matches (the last is `MATCHED_VAR`).
     matched: Vec<Pair>,
     removed_ids: Ranges,
@@ -35,10 +41,24 @@ pub struct Tx {
     detection_only: bool,
     unique_id: Vec<u8>,
     pub body_read: bool,
+    /// The request's values transformed, by (the value's address and length, the chain): a
+    /// value of the request is not freed nor changed while the transaction lives (`Value::stable`).
+    cache: RefCell<FxHashMap<(usize, usize, u32), Transformed>>,
+    /// Per chain and collection, the candidates of all the collection's values, for the phase
+    /// running (the body's values come with phase 2).
+    unions: RefCell<FxHashMap<(u32, Collection), u128>>,
+}
+
+/// A value after a chain of transformations, and which regexes run after the chain may match it.
+struct Transformed {
+    /// `None`: the value as it was.
+    bytes: Option<Vec<u8>>,
+    /// By the chain's candidate slot.
+    candidates: u128,
 }
 
 impl Tx {
-    pub fn new(req: Request, vars: BTreeMap<String, Vec<u8>>, processor: Option<String>, unique_id: u64) -> Tx {
+    pub fn new(req: Request, vars: FxHashMap<String, Vec<u8>>, processor: Option<String>, unique_id: u64) -> Tx {
         Tx {
             req,
             vars,
@@ -53,7 +73,64 @@ impl Tx {
             detection_only: false,
             unique_id: format!("{unique_id:016x}").into_bytes(),
             body_read: false,
+            cache: RefCell::new(FxHashMap::default()),
+            unions: RefCell::new(FxHashMap::default()),
         }
+    }
+
+    /// Whether some value of the link's variables' collections has the literals of its regex
+    /// (a `whole` link's: every variable one of the request's).
+    fn any_candidate(&self, program: &Program, link: &Link, slot: u32) -> bool {
+        let mut union = 0u128;
+        for var in link.vars.iter().filter(|v| !v.exclude) {
+            let key = (link.chain, var.collection);
+            let known = self.unions.borrow().get(&key).copied();
+            let bits = match known {
+                Some(bits) => bits,
+                None => {
+                    let mut bits = 0u128;
+                    each(self, var.collection, &mut |_, _, bytes| {
+                        bits |= self.transformed(program, link.chain, &bytes, |t| t.candidates);
+                    });
+                    self.unions.borrow_mut().insert(key, bits);
+                    bits
+                }
+            };
+            union |= bits;
+            if union & (1 << slot) != 0 {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// `value` (one of the request's, `Value::stable`) through `chain`, with its candidates:
+    /// worked out at its first use in the request; `f` reads it.
+    fn transformed<R>(&self, program: &Program, chain: u32, value: &[u8], f: impl FnOnce(&Transformed) -> R) -> R {
+        let key = (value.as_ptr() as usize, value.len(), chain);
+        if let Some(done) = self.cache.borrow().get(&key) {
+            return f(done);
+        }
+        let c = &program.chains[chain as usize];
+        let mut current: Option<Vec<u8>> = None;
+        for t in &c.transforms {
+            let input = current.as_deref().unwrap_or(value);
+            if t.changes(input) {
+                current = Some(t.apply(input));
+            }
+        }
+        let bytes = current.filter(|b| b != value);
+        let text = bytes.as_deref().unwrap_or(value);
+        let mut candidates = 0u128;
+        if let Some(automaton) = &c.automaton {
+            for m in automaton.find_overlapping_iter(text) {
+                candidates |= 1 << c.slots[m.pattern().as_usize()];
+            }
+        }
+        let done = Transformed { bytes, candidates };
+        let r = f(&done);
+        self.cache.borrow_mut().insert(key, done);
+        r
     }
 
     fn removed(&self, rule: &Rule) -> bool {
@@ -66,17 +143,20 @@ impl Tx {
 
     /// The inbound anomaly score at the blocking paranoia level.
     fn score(&self) -> i64 {
+        const LEVELS: [&str; 4] = [
+            "inbound_anomaly_score_pl1",
+            "inbound_anomaly_score_pl2",
+            "inbound_anomaly_score_pl3",
+            "inbound_anomaly_score_pl4",
+        ];
         let level = self
             .vars
             .get("blocking_paranoia_level")
             .map_or(1, |v| atoi(v))
-            .clamp(1, 4);
-        (1..=level)
-            .map(|pl| {
-                self.vars
-                    .get(&format!("inbound_anomaly_score_pl{pl}"))
-                    .map_or(0, |v| atoi(v))
-            })
+            .clamp(1, 4) as usize;
+        LEVELS[..level]
+            .iter()
+            .map(|key| self.vars.get(*key).map_or(0, |v| atoi(v)))
             .sum()
     }
 }
@@ -87,6 +167,24 @@ struct Value<'a> {
     key: Cow<'a, str>,
     keyed: bool,
     bytes: Cow<'a, [u8]>,
+}
+
+impl Value<'_> {
+    /// One of the request's own values, borrowed: neither freed nor changed while the transaction
+    /// lives, so its address keys the cache (`TX`, the matched variables, the body processor and
+    /// the values made on the fly change or go).
+    fn stable(&self) -> bool {
+        matches!(self.bytes, Cow::Borrowed(_))
+            && !matches!(
+                self.collection,
+                Collection::Tx
+                    | Collection::MatchedVar
+                    | Collection::MatchedVarName
+                    | Collection::MatchedVars
+                    | Collection::MatchedVarsNames
+                    | Collection::ReqbodyProcessor
+            )
+    }
 }
 
 impl Value<'_> {
@@ -235,8 +333,11 @@ fn each<'a>(tx: &'a Tx, collection: Collection, f: &mut dyn FnMut(Cow<'a, str>, 
 
 /// A link's values: its variables less its exclusions and the request's (`ctl`), counts for `&`.
 fn values<'a>(tx: &'a Tx, rule: &Rule, link: &Link, first: bool) -> Vec<Value<'a>> {
-    let mut exclusions: Vec<&Var> = link.vars.iter().filter(|v| v.exclude).collect();
-    if first {
+    let mut exclusions: Vec<&Var> = Vec::new();
+    if link.vars.iter().any(|v| v.exclude) {
+        exclusions.extend(link.vars.iter().filter(|v| v.exclude));
+    }
+    if first && !(tx.removed_targets_by_id.is_empty() && tx.removed_targets_by_tag.is_empty()) {
         for (ids, vars) in &tx.removed_targets_by_id {
             if in_ranges(ids, rule.id) {
                 exclusions.extend(vars);
@@ -249,12 +350,38 @@ fn values<'a>(tx: &'a Tx, rule: &Rule, link: &Link, first: bool) -> Vec<Value<'a
         }
     }
     let excluded = |collection: Collection, key: &str| {
-        exclusions
-            .iter()
-            .any(|e| e.collection == collection && e.selector.as_ref().is_none_or(|s| s.matches(key)))
+        !exclusions.is_empty()
+            && exclusions
+                .iter()
+                .any(|e| e.collection == collection && e.selector.as_ref().is_none_or(|s| s.matches(key)))
     };
     let mut out = Vec::new();
     for var in link.vars.iter().filter(|v| !v.exclude) {
+        // `TX:name`: one lookup, not a walk of every variable (TX's keys are lower case, and so
+        // is the selector).
+        if var.collection == Collection::Tx
+            && let Some(super::program::Select::Key(k)) = &var.selector
+        {
+            let found = tx.vars.get_key_value(k.as_str());
+            if var.count {
+                out.push(Value {
+                    collection: var.collection,
+                    key: Cow::Borrowed(""),
+                    keyed: false,
+                    bytes: Cow::Borrowed(if found.is_some() { b"1" } else { b"0" }),
+                });
+            } else if let Some((key, value)) = found
+                && !excluded(var.collection, key)
+            {
+                out.push(Value {
+                    collection: var.collection,
+                    key: Cow::Borrowed(key.as_str()),
+                    keyed: true,
+                    bytes: Cow::Borrowed(value.as_slice()),
+                });
+            }
+            continue;
+        }
         if var.count {
             let mut n = 0usize;
             each(tx, var.collection, &mut |key, _, _| {
@@ -308,18 +435,48 @@ fn resolve(tx: &Tx, collection: &str, key: Option<&str>) -> Option<Vec<u8>> {
 }
 
 /// Whether the link matches; its matches when it does.
-fn eval_link(tx: &Tx, rule: &Rule, link: &Link, first: bool) -> Option<Vec<Match>> {
+fn eval_link(program: &Program, tx: &Tx, rule: &Rule, link: &Link, first: bool) -> Option<Vec<Match>> {
     let values = values(tx, rule, link, first);
     if values.is_empty() {
         return None;
     }
-    let arg: Cow<[u8]> = match link.op.arg.fixed() {
-        Some(text) if !link.op.arg.is_dynamic() => Cow::Owned(text.into_bytes()),
-        _ => Cow::Owned(link.op.arg.expand(&mut |c, k| resolve(tx, c, k))),
+    let arg: Cow<[u8]> = match &link.op.fixed_arg {
+        Some(text) => Cow::Borrowed(text.as_slice()),
+        None => Cow::Owned(link.op.arg.expand(&mut |c, k| resolve(tx, c, k))),
     };
     let mut matches = Vec::new();
     let mut found = super::ops::Matched::default();
     for v in &values {
+        let chain = &program.chains[link.chain as usize];
+        if !link.multi_match && chain.transforms.is_empty() && chain.automaton.is_none() {
+            // Nothing to transform nor to look up: the value as it is.
+            if link.op.test(&v.bytes, &arg, link.capture, &mut found) != link.op.negated {
+                matches.push(Match {
+                    name: v.name(),
+                    value: v.bytes.to_vec(),
+                    captures: std::mem::take(&mut found.captures),
+                });
+            }
+            continue;
+        }
+        if !link.multi_match && v.stable() {
+            // Transformed once per request; a regex none of whose literals it has, not run.
+            let hit = tx.transformed(program, link.chain, &v.bytes, |done| {
+                if link.prefilter.is_some_and(|slot| done.candidates & (1 << slot) == 0) {
+                    return None;
+                }
+                let text = done.bytes.as_deref().unwrap_or(&v.bytes);
+                (link.op.test(text, &arg, link.capture, &mut found) != link.op.negated).then(|| text.to_vec())
+            });
+            if let Some(value) = hit {
+                matches.push(Match {
+                    name: v.name(),
+                    value,
+                    captures: std::mem::take(&mut found.captures),
+                });
+            }
+            continue;
+        }
         let mut current: Cow<[u8]> = Cow::Borrowed(v.bytes.as_ref());
         let tested = |text: &[u8], found: &mut super::ops::Matched| {
             link.op.test(text, &arg, link.capture, found) != link.op.negated
@@ -391,27 +548,49 @@ fn apply(tx: &mut Tx, link: &Link, matches: &[Match]) {
 /// A link's `setvar`s, macros expanded against the transaction as it is.
 fn setvars(tx: &mut Tx, link: &Link) {
     for set in &link.setvars {
-        let key = String::from_utf8_lossy(&set.key.expand(&mut |c, k| resolve(tx, c, k))).to_ascii_lowercase();
+        let key: Cow<str> = match &set.fixed_key {
+            Some(k) => Cow::Borrowed(k.as_str()),
+            None => {
+                Cow::Owned(String::from_utf8_lossy(&set.key.expand(&mut |c, k| resolve(tx, c, k))).to_ascii_lowercase())
+            }
+        };
         if key.is_empty() {
             continue;
         }
         match &set.op {
             SetOp::Delete => {
-                tx.vars.remove(&key);
+                tx.vars.remove(key.as_ref());
             }
             SetOp::Set(m) => {
-                let v = m.expand(&mut |c, k| resolve(tx, c, k));
-                tx.vars.insert(key, v);
+                let v = match &set.fixed_value {
+                    Some(v) => v.clone(),
+                    None => m.expand(&mut |c, k| resolve(tx, c, k)),
+                };
+                match tx.vars.get_mut(key.as_ref()) {
+                    Some(old) => *old = v,
+                    None => {
+                        tx.vars.insert(key.into_owned(), v);
+                    }
+                }
             }
             SetOp::Add(m) | SetOp::Sub(m) => {
-                let n = atoi(&m.expand(&mut |c, k| resolve(tx, c, k)));
-                let old = tx.vars.get(&key).map_or(0, |v| atoi(v));
-                let new = if matches!(set.op, SetOp::Add(_)) {
-                    old + n
-                } else {
-                    old - n
+                // `+%{tx.critical_anomaly_score}`: the number read where it is, not copied.
+                let n = match (&set.fixed_value, m.single()) {
+                    (Some(v), _) => atoi(v),
+                    (None, Some(("TX", Some(k)))) => tx.vars.get(k).map_or(0, |v| atoi(v)),
+                    _ => atoi(&m.expand(&mut |c, k| resolve(tx, c, k))),
                 };
-                tx.vars.insert(key, new.to_string().into_bytes());
+                let n = if matches!(set.op, SetOp::Add(_)) { n } else { -n };
+                match tx.vars.get_mut(key.as_ref()) {
+                    Some(old) => {
+                        let new = atoi(old) + n;
+                        old.clear();
+                        let _ = std::io::Write::write_fmt(old, format_args!("{new}"));
+                    }
+                    None => {
+                        tx.vars.insert(key.into_owned(), n.to_string().into_bytes());
+                    }
+                }
             }
         }
     }
@@ -419,6 +598,8 @@ fn setvars(tx: &mut Tx, link: &Link) {
 
 /// The rules of `phase` (0: the head, 1: the body) over the transaction; hits go to `found`.
 pub fn run(program: &Program, phase: usize, tx: &mut Tx, found: &mut Found<'_>) {
+    // The candidates of phase 1 do not know the body's values.
+    tx.unions.borrow_mut().clear();
     let items = &program.phases[phase];
     let jumps = &program.jumps[phase];
     let mut i = 0;
@@ -435,11 +616,22 @@ pub fn run(program: &Program, phase: usize, tx: &mut Tx, found: &mut Found<'_>) 
             i += 1;
             continue;
         }
-        let before = tx.score();
+        // The score is looked at only around a rule that may change it.
+        let scores = rule.links.iter().any(|l| !l.setvars.is_empty());
+        let before = if scores { tx.score() } else { 0 };
         let mut first: Option<(String, Vec<u8>)> = None;
         let mut matched = true;
         for (k, link) in rule.links.iter().enumerate() {
-            match eval_link(tx, rule, link, k == 0) {
+            // A regex none of whose literals any of the values it reads has: no match, the values
+            // not gathered.
+            if link.whole
+                && let Some(slot) = link.prefilter
+                && !tx.any_candidate(program, link, slot)
+            {
+                matched = false;
+                break;
+            }
+            match eval_link(program, tx, rule, link, k == 0) {
                 Some(matches) => {
                     if k == 0 {
                         let m = &matches[0];
@@ -462,7 +654,7 @@ pub fn run(program: &Program, phase: usize, tx: &mut Tx, found: &mut Found<'_>) 
             i += 1;
             continue;
         }
-        let score = (tx.score() - before).max(0) as u32;
+        let score = if scores { (tx.score() - before).max(0) as u32 } else { 0 };
         let verdict = match rule.disruptive {
             Disruptive::Deny => Some(Verdict::Block),
             Disruptive::Allow => Some(Verdict::Pass),

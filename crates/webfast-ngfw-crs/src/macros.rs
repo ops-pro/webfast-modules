@@ -44,6 +44,14 @@ impl Macro {
         Ok(Macro { pieces })
     }
 
+    /// The collection and key when the macro is one variable alone (`%{tx.critical_anomaly_score}`).
+    pub fn single(&self) -> Option<(&str, Option<&str>)> {
+        match self.pieces.as_slice() {
+            [Piece::Var(c, k)] => Some((c.as_str(), k.as_deref())),
+            _ => None,
+        }
+    }
+
     /// Whether it has a variable.
     pub fn is_dynamic(&self) -> bool {
         self.pieces.iter().any(|p| matches!(p, Piece::Var(..)))

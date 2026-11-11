@@ -38,6 +38,7 @@ maxminddb = "0.27"
 memchr = "2"
 percent-encoding = "2"
 regex = "1"
+regex-syntax = "0.8"
 rustc-hash = "2"
 schemars = "1"
 serde = { version = "1", features = ["derive"] }

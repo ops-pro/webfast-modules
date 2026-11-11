@@ -43,7 +43,7 @@ impl Select {
 }
 
 /// The collections and single variables known (request.rs gives their values).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Collection {
     Args,
     ArgsNames,
@@ -153,6 +153,25 @@ impl Collection {
         })
     }
 
+    /// Whether its values are the request's own, borrowed and kept as they are while the
+    /// transaction lives (not `TX`, the matched variables, the body processor, nor values made on
+    /// the fly as the sizes and counts).
+    pub fn stable(self) -> bool {
+        !matches!(
+            self,
+            Collection::Tx
+                | Collection::MatchedVar
+                | Collection::MatchedVarName
+                | Collection::MatchedVars
+                | Collection::MatchedVarsNames
+                | Collection::ReqbodyProcessor
+                | Collection::ArgsCombinedSize
+                | Collection::RequestBodyLength
+                | Collection::FilesCombinedSize
+                | Collection::UniqueId
+        )
+    }
+
     /// The name before `:` in `MATCHED_VAR_NAME`.
     pub fn name(self) -> &'static str {
         match self {
@@ -203,6 +222,10 @@ impl Collection {
 pub struct SetVar {
     pub key: Macro,
     pub op: SetOp,
+    /// The key when it has no macro (lower case), made once.
+    pub fixed_key: Option<String>,
+    /// The value (or the number added) when it has no macro, made once.
+    pub fixed_value: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone)]
@@ -250,7 +273,28 @@ pub struct Link {
     pub capture: bool,
     pub setvars: Vec<SetVar>,
     pub ctls: Vec<Ctl>,
+    /// Its transformations' place in `Program::chains` (`build_prefilters`).
+    pub chain: u32,
+    /// Its slot in a value's candidates for its chain (0 to 127): set when the value has one of
+    /// its regex's literals; none, the regex runs on every value.
+    pub prefilter: Option<u32>,
+    /// With a prefilter, every variable one of the request's own (`Collection::stable`): the
+    /// link fails at once when no value of its chain's collections has its literals.
+    pub whole: bool,
 }
+
+/// One list of transformations the links use, with the automaton of the literals of the regexes
+/// run after it: one pass over a transformed value says which of them may match.
+#[derive(Debug, Clone, Default)]
+pub struct Chain {
+    pub transforms: Vec<Transform>,
+    pub automaton: Option<aho_corasick::AhoCorasick>,
+    /// The candidate slot of each of the automaton's patterns.
+    pub slots: Vec<u32>,
+}
+
+/// Candidate slots per chain: one `u128` per value.
+pub const SLOTS: u32 = 128;
 
 impl std::fmt::Debug for Operator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -293,6 +337,8 @@ pub struct Program {
     pub ignored: Vec<String>,
     /// Rules of the response phases left out.
     pub later: usize,
+    /// The links' lists of transformations, each once (`build_prefilters`).
+    pub chains: Vec<Chain>,
 }
 
 /// What reads the CRS's data files (`@pmFromFile`).
@@ -623,6 +669,61 @@ impl Program {
         }
     }
 
+    /// Each link's chain of transformations, and for each regex with literals a candidate slot in
+    /// its chain's automaton (a negated or `multiMatch` one has none: it runs on every value; nor
+    /// has one past the chain's `SLOTS`).
+    pub fn build_prefilters(&mut self) -> Result<()> {
+        let mut chains: Vec<Chain> = Vec::new();
+        let mut patterns: Vec<Vec<(Vec<u8>, u32)>> = Vec::new();
+        let mut used: Vec<u32> = Vec::new();
+        for rule in &mut self.rules {
+            for link in &mut rule.links {
+                let chain = match chains.iter().position(|c| c.transforms == link.transforms) {
+                    Some(i) => i,
+                    None => {
+                        chains.push(Chain {
+                            transforms: link.transforms.clone(),
+                            ..Chain::default()
+                        });
+                        patterns.push(Vec::new());
+                        used.push(0);
+                        chains.len() - 1
+                    }
+                };
+                link.chain = chain as u32;
+                if link.op.kind == super::ops::Kind::Rx
+                    && !link.op.negated
+                    && !link.multi_match
+                    && used[chain] < SLOTS
+                    && let Some(literals) = &link.op.literals
+                {
+                    let slot = used[chain];
+                    used[chain] += 1;
+                    link.prefilter = Some(slot);
+                    patterns[chain].extend(literals.iter().map(|l| (l.clone(), slot)));
+                    link.whole = link
+                        .vars
+                        .iter()
+                        .all(|v| v.exclude || (!v.count && v.collection.stable()));
+                }
+            }
+        }
+        for (chain, list) in chains.iter_mut().zip(patterns) {
+            if list.is_empty() {
+                continue;
+            }
+            let automaton = aho_corasick::AhoCorasickBuilder::new()
+                .ascii_case_insensitive(true)
+                .kind(Some(aho_corasick::AhoCorasickKind::DFA))
+                .build(list.iter().map(|(l, _)| l))
+                .context("the prefilter's automaton")?;
+            chain.automaton = Some(automaton);
+            chain.slots = list.into_iter().map(|(_, s)| s).collect();
+        }
+        self.chains = chains;
+        Ok(())
+    }
+
     /// The rules in the phases (removed ones not counted).
     pub fn count(&self) -> usize {
         self.phases
@@ -748,6 +849,9 @@ fn link(vars: Vec<Var>, op: Arc<Operator>, actions: &[seclang::Action], default_
         capture,
         setvars,
         ctls,
+        chain: 0,
+        prefilter: None,
+        whole: false,
     })
 }
 
@@ -794,10 +898,12 @@ fn update_actions(rule: &mut Rule, actions: &[seclang::Action]) -> Result<()> {
 pub fn compile_vars(vars: &[Variable]) -> Result<Vec<Var>> {
     vars.iter()
         .map(|v| {
+            let collection = Collection::parse(&v.collection)?;
             Ok(Var {
-                collection: Collection::parse(&v.collection)?,
+                collection,
                 selector: match &v.selector {
                     None => None,
+                    Some(Selector::Key(k)) if collection == Collection::Tx => Some(Select::Key(k.to_ascii_lowercase())),
                     Some(Selector::Key(k)) => Some(Select::Key(k.clone())),
                     Some(Selector::Regex(re)) => Some(Select::Regex(super::ops::regex(re, true)?)),
                 },
@@ -826,6 +932,8 @@ fn setvar(text: &str) -> Result<SetVar> {
         return Ok(SetVar {
             key: Macro::default(),
             op: SetOp::Delete,
+            fixed_key: Some(String::new()),
+            fixed_value: None,
         });
     }
     let key = Macro::parse(&key.to_ascii_lowercase())?;
@@ -842,7 +950,17 @@ fn setvar(text: &str) -> Result<SetVar> {
             }
         }
     };
-    Ok(SetVar { key, op })
+    let fixed_key = key.fixed().map(|k| k.to_ascii_lowercase());
+    let fixed_value = match &op {
+        SetOp::Set(m) | SetOp::Add(m) | SetOp::Sub(m) => m.fixed().map(String::into_bytes),
+        SetOp::Delete => None,
+    };
+    Ok(SetVar {
+        key,
+        op,
+        fixed_key,
+        fixed_value,
+    })
 }
 
 /// `920100` or `920100-920199`.

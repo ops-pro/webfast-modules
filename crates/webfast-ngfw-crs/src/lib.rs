@@ -75,7 +75,7 @@ struct Config {
 pub struct CrsEngine {
     program: program::Program,
     /// `TX` at a request's start: the setup's variables.
-    setup: BTreeMap<String, Vec<u8>>,
+    setup: rustc_hash::FxHashMap<String, Vec<u8>>,
     paranoia: u8,
     detection: u8,
     /// Files of the site read, for the summary.
@@ -133,7 +133,7 @@ impl CrsEngine {
         if !(paranoia..=4).contains(&detection) {
             bail!("detection_paranoia: from paranoia ({paranoia}) to 4, not {detection}");
         }
-        let mut setup = BTreeMap::new();
+        let mut setup = rustc_hash::FxHashMap::default();
         setup.insert("crs_setup_version".to_string(), SETUP_VERSION.as_bytes().to_vec());
         setup.insert("blocking_paranoia_level".to_string(), paranoia.to_string().into_bytes());
         setup.insert(
@@ -189,6 +189,7 @@ impl CrsEngine {
             program.add(&text, "remove", "crs", &read_data)?;
         }
         program.link_jumps();
+        program.build_prefilters()?;
         Ok(CrsEngine {
             program,
             setup,

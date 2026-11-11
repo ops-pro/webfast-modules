@@ -77,6 +77,45 @@ impl Transform {
         }))
     }
 
+    /// Whether the transformation may change `input`: `false` only when it surely gives it back
+    /// as it is (no `%` for a URL decoding, no upper case for `lowercase`), so most values of a
+    /// request go through a chain without a copy.
+    pub fn changes(self, input: &[u8]) -> bool {
+        let has = |b: u8| memchr::memchr(b, input).is_some();
+        let has_seq = |s: &[u8]| memchr::memmem::find(input, s).is_some();
+        match self {
+            Transform::Lowercase => input.iter().any(u8::is_ascii_uppercase),
+            Transform::Uppercase => input.iter().any(u8::is_ascii_lowercase),
+            Transform::UrlDecode | Transform::UrlDecodeUni => memchr::memchr2(b'%', b'+', input).is_some(),
+            Transform::HtmlEntityDecode => has(b'&'),
+            Transform::JsDecode | Transform::CssDecode | Transform::EscapeSeqDecode => has(b'\\'),
+            Transform::Utf8ToUnicode => !input.is_ascii(),
+            Transform::RemoveNulls | Transform::ReplaceNulls => has(0),
+            Transform::RemoveWhitespace => input.iter().any(|&b| is_space(b) || b == 0xa0),
+            Transform::CompressWhitespace => {
+                input.iter().any(|&b| (is_space(b) && b != b' ') || b == 0xa0) || has_seq(b"  ")
+            }
+            Transform::ReplaceComments => has_seq(b"/*"),
+            Transform::RemoveComments => has_seq(b"/*") || has_seq(b"--") || has(b'#') || has_seq(b"<!--"),
+            Transform::RemoveCommentsChar => {
+                has_seq(b"/*") || has_seq(b"*/") || has_seq(b"--") || has(b'#') || has_seq(b"<!--")
+            }
+            Transform::CmdLine => input.iter().any(|&b| {
+                b.is_ascii_uppercase() || is_space(b) || matches!(b, b'\\' | b'"' | b'\'' | b'^' | b',' | b';')
+            }),
+            Transform::NormalizePath => has_seq(b"/.") || has_seq(b"//") || input.first() == Some(&b'.'),
+            Transform::NormalizePathWin => {
+                has(b'\\') || has_seq(b"/.") || has_seq(b"//") || input.first() == Some(&b'.')
+            }
+            Transform::Trim => {
+                input.first().is_some_and(|&b| is_space(b)) || input.last().is_some_and(|&b| is_space(b))
+            }
+            Transform::TrimLeft => input.first().is_some_and(|&b| is_space(b)),
+            Transform::TrimRight => input.last().is_some_and(|&b| is_space(b)),
+            _ => true,
+        }
+    }
+
     /// The value transformed.
     pub fn apply(self, input: &[u8]) -> Vec<u8> {
         match self {
@@ -741,6 +780,59 @@ mod tests {
         assert_eq!(t("trim", "  a  "), "a");
         assert_eq!(t("hexEncode", "AB"), "4142");
         assert_eq!(t("base64Encode", "ab"), "YWI=");
+    }
+
+    #[test]
+    /// `changes` is `false` only where `apply` gives the value back as it is.
+    fn no_change_is_no_change() {
+        let all = [
+            "lowercase",
+            "uppercase",
+            "urlDecode",
+            "urlDecodeUni",
+            "htmlEntityDecode",
+            "jsDecode",
+            "cssDecode",
+            "utf8toUnicode",
+            "removeNulls",
+            "replaceNulls",
+            "removeWhitespace",
+            "compressWhitespace",
+            "replaceComments",
+            "removeComments",
+            "removeCommentsChar",
+            "cmdLine",
+            "normalizePath",
+            "normalizePathWin",
+            "escapeSeqDecode",
+            "trim",
+            "trimLeft",
+            "trimRight",
+        ];
+        let inputs: [&[u8]; 14] = [
+            b"",
+            b"abc",
+            b"ABC",
+            b"a b",
+            b"a  b",
+            b"a\tb",
+            b"%41",
+            b"a+b",
+            b"&lt;",
+            b"\\x41",
+            b"/a/./b",
+            b"a//b",
+            b"./x",
+            "caf\u{e9}".as_bytes(),
+        ];
+        for name in all {
+            let t = Transform::parse(name).unwrap().unwrap();
+            for input in inputs {
+                if !t.changes(input) {
+                    assert_eq!(t.apply(input), input, "{name} over {input:?}");
+                }
+            }
+        }
     }
 
     #[test]
