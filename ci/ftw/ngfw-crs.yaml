@@ -1,0 +1,34 @@
+# The third pass: the bundled OWASP CRS (webfast-ngfw-crs) at the settings its own regression
+# tests run with (the release's tests/docker-compose.yml: blocking paranoia 4, the rule engine in
+# DetectionOnly, its argument and file limits), the built-in sets off. Every request goes on to
+# albedo; its hits are written (log_only, log.passed) for go-ftw to find by the CRS rule's id.
+mode: log_only
+threshold: 5
+log:
+  output: /var/log/web/ngfw.log
+  passed: true
+  test_marker: X-CRS-Test
+response:
+  status: 403
+rules:
+  builtin: none
+body:
+  max_inspect: 128KiB
+  types:
+    - application/x-www-form-urlencoded
+    - application/json
+    - multipart/form-data
+    - text/xml
+    - application/xml
+    - text/plain
+engines:
+  crs:
+    paranoia: 4
+    tx:
+      # The CRS's test image's defaults for what its compose file leaves out.
+      max_num_args: 255
+      arg_name_length: 100
+      arg_length: 400
+      total_arg_length: 6400
+      max_file_size: 64100
+      combined_file_sizes: 65535

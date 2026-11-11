@@ -149,7 +149,7 @@ fn score(rule: &Rule) -> u32 {
 
 /// The text of docs/ngfw-rules.md.
 pub(crate) fn reference() -> String {
-    let (composed, _) = compose(&RulesConfig::default(), Path::new(".")).expect("the built-in sets load");
+    let (composed, _) = compose(&RulesConfig::default(), Path::new("."), None).expect("the built-in sets load");
     let sets: Vec<(&str, String)> = super::SETS
         .iter()
         .map(|(name, text)| {

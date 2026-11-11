@@ -34,6 +34,9 @@ pub struct FileConfig {
     pub access: AccessConfig,
     #[serde(rename = "match")]
     pub matcher: Option<MatchConfig>,
+    /// The rule engines' configurations (src/plugin.rs), by name; `false` turns one off.
+    #[serde(default)]
+    pub engines: BTreeMap<String, serde_json::Value>,
 }
 
 fn five() -> u32 {
@@ -48,7 +51,8 @@ pub struct LogConfig {
     /// Bytes of the matched text written per hit; 0: none.
     #[serde(default = "two_hundred")]
     pub matched: usize,
-    /// Also write requests that scored but stayed under the threshold.
+    /// Also write requests let through with hits: scored under the threshold, or hits that only
+    /// log (`action: log`, an engine's detection-only rules).
     #[serde(default)]
     pub passed: bool,
     /// For a test deployment: a request with this header (go-ftw's `X-CRS-Test`) also writes its
@@ -167,8 +171,9 @@ fn yes() -> bool {
 #[derive(Deserialize, Debug, Default)]
 #[serde(deny_unknown_fields)]
 pub struct RulesConfig {
+    /// Not given: all the sets, or with a rule engine on (src/plugin.rs) the sets it names.
     #[serde(default)]
-    pub builtin: Builtin,
+    pub builtin: Option<Builtin>,
     /// The site's own files, relative to this file, applied in order.
     #[serde(default)]
     pub include: Vec<String>,
@@ -534,12 +539,23 @@ fn valid_id(id: &str) -> bool {
 
 /// The rule list composed (docs/ngfw.md "Composition"); `base`: the configuration file's
 /// directory, where `include` files are.
-pub fn compose(config: &RulesConfig, base: &Path) -> Result<(Vec<Sourced>, Loaded)> {
+///
+/// `engine_sets`: the sets the rule engines on leave on, for a `rules.builtin` not given.
+pub fn compose(
+    config: &RulesConfig,
+    base: &Path,
+    engine_sets: Option<Vec<&'static str>>,
+) -> Result<(Vec<Sourced>, Loaded)> {
     let mut loaded = Loaded::default();
     let mut rules: Vec<Sourced> = Vec::new();
     // The built-in rules on libinjection's detectors: left out at the end when it is not built.
     let mut detecting: Vec<String> = Vec::new();
-    for name in config.builtin.sets()? {
+    let sets = match (&config.builtin, engine_sets) {
+        (Some(builtin), _) => builtin.sets()?,
+        (None, Some(sets)) => sets,
+        (None, None) => Builtin::default().sets()?,
+    };
+    for name in sets {
         let text = super::rules::set(name).expect("a listed set");
         for mut rule in parse_rules(text, &format!("built-in set {name}"))? {
             rule.set.get_or_insert_with(|| name.to_string());
@@ -742,7 +758,7 @@ mod tests {
         assert_eq!(config.threshold, 7);
         assert_eq!(config.response.status, 403);
         assert_eq!(config.body.json_max_depth, 20);
-        assert_eq!(config.rules.builtin, Builtin::default());
+        assert_eq!(config.rules.builtin, None);
         let config: FileConfig = webfast_core::yaml::from_str("").unwrap();
         assert_eq!(config.threshold, 5);
         assert!(webfast_core::yaml::from_str::<FileConfig>("thresold: 5\n").is_err());
@@ -750,12 +766,15 @@ mod tests {
             "rules:\n  builtin: [sqli, xss]\n  override:\n    wf-942-100: {score: 2, mode: log_only}\n",
         )
         .unwrap();
-        assert_eq!(config.rules.builtin.sets().unwrap(), vec!["sqli", "xss"]);
+        assert_eq!(
+            config.rules.builtin.as_ref().unwrap().sets().unwrap(),
+            vec!["sqli", "xss"]
+        );
         assert_eq!(config.rules.overrides["wf-942-100"].score, Some(2));
         let config: FileConfig = webfast_core::yaml::from_str("rules:\n  builtin: none\n").unwrap();
-        assert!(config.rules.builtin.sets().unwrap().is_empty());
+        assert!(config.rules.builtin.as_ref().unwrap().sets().unwrap().is_empty());
         let config: FileConfig = webfast_core::yaml::from_str("rules:\n  builtin: [bogus]\n").unwrap();
-        assert!(config.rules.builtin.sets().is_err());
+        assert!(config.rules.builtin.as_ref().unwrap().sets().is_err());
     }
 
     fn site_file(dir: &Path, name: &str, text: &str) {
@@ -819,7 +838,7 @@ override:
 "#,
         )
         .unwrap();
-        let (rules, loaded) = compose(&config, dir.path()).unwrap();
+        let (rules, loaded) = compose(&config, dir.path(), None).unwrap();
         let ids: Vec<&str> = rules.iter().map(|r| r.rule.id.as_str()).collect();
         // The replaced rule keeps its place; disabled ones are gone; the new site rule is last.
         assert_eq!(ids, ["wf-913-200", "wf-942-100", "my-rule"]);
@@ -855,11 +874,11 @@ override:
 
         let config: RulesConfig =
             webfast_core::yaml::from_str("builtin: none\noverride: {nothing: {score: 1}}\n").unwrap();
-        assert!(compose(&config, dir.path()).is_err(), "an override of no rule");
+        assert!(compose(&config, dir.path(), None).is_err(), "an override of no rule");
         let config: RulesConfig = webfast_core::yaml::from_str("builtin: none\ndisable: [nothing]\n").unwrap();
-        assert!(compose(&config, dir.path()).is_err(), "a disable of no rule");
+        assert!(compose(&config, dir.path(), None).is_err(), "a disable of no rule");
         let config: RulesConfig = webfast_core::yaml::from_str("builtin: none\ndisable: [nothing-*]\n").unwrap();
-        let (rules, loaded) = compose(&config, dir.path()).unwrap();
+        let (rules, loaded) = compose(&config, dir.path(), None).unwrap();
         assert!(rules.is_empty());
         assert_eq!(loaded.warnings.len(), 1, "a mask that matches nothing is a warning");
     }
@@ -870,7 +889,7 @@ override:
             "builtin: [scanners, cve]\ndisable: [wf-913-100]\ndisable_tags: [wordpress, spring, no-such-tag]\n",
         )
         .unwrap();
-        let (rules, loaded) = compose(&config, Path::new(".")).unwrap();
+        let (rules, loaded) = compose(&config, Path::new("."), None).unwrap();
         let ids: Vec<&str> = rules.iter().map(|r| r.rule.id.as_str()).collect();
         assert!(!ids.contains(&"wf-913-200"), "the WordPress probe is off");
         assert!(ids.contains(&"wf-913-210"), "the rest of the set stays");
@@ -901,7 +920,7 @@ override:
             "builtin: [sqli]\noverride:\n  wf-942-100: {confidence: low, refs: {cwe: [CWE-20]}, doc: changed}\n",
         )
         .unwrap();
-        let (rules, _) = compose(&config, Path::new(".")).unwrap();
+        let (rules, _) = compose(&config, Path::new("."), None).unwrap();
         let rule = &rules.iter().find(|r| r.rule.id == "wf-942-100").unwrap().rule;
         assert_eq!(rule.confidence, Some(Confidence::Low));
         assert_eq!(rule.refs.cwe, ["CWE-20"]);
@@ -910,7 +929,7 @@ override:
 
     #[test]
     fn every_builtin_set_parses_with_unique_ids() {
-        let (rules, loaded) = compose(&RulesConfig::default(), Path::new(".")).unwrap();
+        let (rules, loaded) = compose(&RulesConfig::default(), Path::new("."), None).unwrap();
         assert_eq!(loaded.total(), rules.len());
         assert_eq!(loaded.counts.len(), super::super::rules::SETS.len());
         for rule in &rules {
@@ -933,7 +952,7 @@ override:
             "builtin: [sqli, xss]\ndisable: [wf-941-150]\noverride: {wf-942-170: {score: 4}}\n",
         )
         .unwrap();
-        let (rules, _) = compose(&config, Path::new(".")).unwrap();
+        let (rules, _) = compose(&config, Path::new("."), None).unwrap();
         assert!(!rules.iter().any(|r| r.rule.id == "wf-941-150"));
         assert_eq!(
             rules.iter().any(|r| r.rule.id == "wf-942-170"),

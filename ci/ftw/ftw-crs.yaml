@@ -1,0 +1,27 @@
+# go-ftw for the third pass: the CRS release's own regression tests (tests/regression/tests of the
+# tag webfast-ngfw-crs bundles) against the CRS engine. A test listed under `ignore` is one this
+# server cannot answer as the test expects, for the reason given.
+logfile: /var/log/web/ngfw.log
+logmarkerheadername: X-CRS-Test
+testoverride:
+  input:
+    dest_addr: webfast
+    port: 8080
+  ignore:
+    # The CRS's tests are written for Apache httpd (its reference). These expect what httpd does
+    # with the request before ModSecurity sees it, which webfast's HTTP/1 parser does otherwise.
+    '^920100-16$': 'httpd refuses a request line of a scheme and host with no path (400); webfast reads the path as /'
+    '^920181-1$': 'httpd drops Content-Length when Transfer-Encoding is there; webfast keeps both headers for the rules to see'
+    '^920620-1$': 'httpd joins two Content-Type headers into one; webfast keeps them apart, so the rule finds two'
+    '^920100-(4|8)$': 'httpd answers these request lines (CONNECT, a path with a port and a fragment) with its own status'
+    '^920290-1$': 'expects httpd''s 400 for an empty Host'
+    '^920430-(5|8)$': 'webfast''s HTTP/1 parser refuses an empty or unknown HTTP version (400) before any check'
+    '^920610-2$': 'expects httpd''s 400 for a raw fragment in the request target'
+    # A raw <, >, ", [ or ] in the request target: webfast's HTTP/1 parser refuses the request
+    # (400) before any check, so the filter never sees it (httpd lets it through to ModSecurity).
+    '^(921120-[12]|921210-1|930120-9|932236-21|932240-(9|14|15)|932250-5|932260-28|932371-1|934100-(13|14|23)|934101-4|934130-7|934160-(7|22)|941100-1|941110-2|941160-1|941240-2|942130-9|942500-[12]|943100-1)$': 'a raw <, >, ", [ or ] in the request target: refused by the HTTP parser (400) before the filter'
+    # These look for ModSecurity's own log line (`[id "922130"] [msg "…"]`) or a header name as
+    # sent (`REQUEST_HEADERS:Referer`); the filter writes JSON, header names in lower case. The
+    # rules match (their ids are in the line).
+    '^922130-(1|2|4|7)$': 'matches the text of ModSecurity''s log line; the filter''s is JSON'
+    '^932207-7$': 'matches the header name as sent (Referer); the filter writes header names in lower case'

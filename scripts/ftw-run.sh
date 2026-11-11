@@ -2,10 +2,13 @@
 # The filter's go-ftw tests against a webfast binary, in Docker (ci/ftw/compose.yaml: the binary
 # on alpine, albedo as the backend, go-ftw; the images pinned there).
 #
-#   WEBFAST_BIN=path/to/webfast scripts/ftw-run.sh [all] [cve]     (none named: both)
+#   WEBFAST_BIN=path/to/webfast scripts/ftw-run.sh [all] [cve] [crs]     (none named: all, cve)
 #
 # all: every built-in set, as the filter ships; the tests of ci/ftw/ftw-all.yaml's `ignore` are
 #      skipped, each for its reason. cve: the cve set alone, its tests only, nothing ignored.
+# crs: the bundled OWASP CRS (a binary built with the ngfw-crs feature) on the CRS release's own
+#      regression tests, at their settings (ci/ftw/ngfw-crs.yaml); the tests are CRS_TESTS (a
+#      directory), or fetched from the release webfast-ngfw-crs bundles, its checksum checked.
 # Each pass starts a fresh webfast with its filter file and an empty log. The output of go-ftw,
 # the filter's log and the server's own log of each pass go to FTW_OUT (default ci/ftw/out).
 #
@@ -27,12 +30,43 @@ export FTW_OUT
 
 passes=("$@")
 [ ${#passes[@]} -gt 0 ] || passes=(all cve)
+
+# The CRS's regression tests of the release bundled (crates/webfast-ngfw-crs/src/lib.rs).
+crs_tests() {
+  if [ -n "${CRS_TESTS:-}" ]; then
+    CRS_TESTS=$(realpath "$CRS_TESTS") || return 1
+    export CRS_TESTS
+    return 0
+  fi
+  local version sum
+  version=$(sed -n 's/^pub const CRS_VERSION: &str = "\(.*\)";/\1/p' ../../crates/webfast-ngfw-crs/src/lib.rs)
+  sum=a4bb3688ef6205b64471a9ccbf0d7b024eb8edf39b97c6f6c0006e7a948f8550
+  [ "$version" = 4.30.0 ] || { echo "the checksum here is 4.30.0's, the crate bundles $version" >&2; return 1; }
+  if [ ! -d crs-tests ]; then
+    curl -fsSL -o crs.tar.gz "https://github.com/coreruleset/coreruleset/archive/refs/tags/v$version.tar.gz" || return 1
+    echo "$sum  crs.tar.gz" | sha256sum -c - >/dev/null || { echo "crs.tar.gz: not the release's checksum" >&2; return 1; }
+    mkdir -p crs-tests
+    tar -xzf crs.tar.gz -C crs-tests --strip-components=4 "coreruleset-$version/tests/regression/tests" || return 1
+    rm -f crs.tar.gz
+  fi
+  CRS_TESTS=$(realpath crs-tests)
+  export CRS_TESTS
+}
 failed=()
 for pass in "${passes[@]}"; do
+  exclude=()
   case "$pass" in
     all) dir=/tests ;;
     cve) dir=/tests/rules/cve ;;
-    *) echo "unknown pass $pass (all, cve)" >&2; exit 2 ;;
+    crs)
+      dir=/crs-tests
+      crs_tests || { failed+=("$pass"); continue; }
+      # The rules the engine does not load: the blocking evaluation (949, the filter decides) and
+      # the response phases' (95x, 959, 980). 921140-1 writes a raw CR/LF in a header, which go-ftw
+      # refuses to send (and stops the run).
+      exclude=(--exclude '^(921140-1|949[0-9]{3}-[0-9]+|95[0-9]{4}-[0-9]+|980[0-9]{3}-[0-9]+)$')
+      ;;
+    *) echo "unknown pass $pass (all, cve, crs)" >&2; exit 2 ;;
   esac
   export FTW_PASS=$pass
   echo "== $pass"
@@ -45,7 +79,7 @@ for pass in "${passes[@]}"; do
   # The filter creates its log at its first line, and go-ftw opens it before its first request.
   docker compose exec -T webfast touch /var/log/web/ngfw.log
   docker compose run --rm -T goftw run --config "/ftw-$pass.yaml" -d "$dir" \
-    --show-failures-only --read-timeout 5s \
+    --show-failures-only --read-timeout 5s "${exclude[@]}" \
     2>&1 | tee "$FTW_OUT/ftw-$pass.txt"
   [ "${PIPESTATUS[0]}" -eq 0 ] || failed+=("$pass")
   docker compose cp webfast:/var/log/web/ngfw.log "$FTW_OUT/ngfw-$pass.log" >/dev/null 2>&1

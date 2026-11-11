@@ -1670,6 +1670,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "webfast-ngfw-crs"
+version = "0.1.2"
+dependencies = [
+ "aho-corasick",
+ "anyhow",
+ "aws-lc-rs",
+ "barbacane-libinjection",
+ "bytes",
+ "http",
+ "ipnet",
+ "memchr",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "webfast-core",
+ "webfast-ngfw",
+]
+
+[[package]]
 name = "webpki-roots"
 version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"

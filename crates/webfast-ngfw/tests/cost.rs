@@ -48,7 +48,7 @@ fn allocations() -> usize {
 }
 
 fn builtin() -> Compiled {
-    let (rules, _) = compose(&RulesConfig::default(), Path::new(".")).unwrap();
+    let (rules, _) = compose(&RulesConfig::default(), Path::new("."), None).unwrap();
     compile(&rules, Mode::Block, &[]).unwrap()
 }
 

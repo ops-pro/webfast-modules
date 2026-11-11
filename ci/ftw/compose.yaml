@@ -2,7 +2,7 @@
 # src/ftw.rs from the rules' examples and tests/corpus/): a webfast binary built with this
 # checkout's modules, albedo behind it as the backend, go-ftw sending the tests to webfast and
 # reading the filter's log. The images are pinned; the binary is the one given in WEBFAST_BIN (static, as webfast's release builds it).
-# scripts/ftw-run.sh drives it: one pass per filter file (FTW_PASS: all, cve).
+# scripts/ftw-run.sh drives it: one pass per filter file (FTW_PASS: all, cve, crs).
 name: webfast-ftw
 
 services:
@@ -24,6 +24,7 @@ services:
       - ./Caddyfile:/etc/webfast/Caddyfile:ro
       - ./ngfw-all.yaml:/etc/webfast/ngfw-all.yaml:ro
       - ./ngfw-cve.yaml:/etc/webfast/ngfw-cve.yaml:ro
+      - ./ngfw-crs.yaml:/etc/webfast/ngfw-crs.yaml:ro
       - logs:/var/log/web
     healthcheck:
       test: ["CMD", "/usr/local/bin/webfast", "healthcheck", "http://127.0.0.1:8080/healthz"]
@@ -41,6 +42,9 @@ services:
       - ../../crates/webfast-ngfw/tests/ftw:/tests:ro
       - ./ftw-all.yaml:/ftw-all.yaml:ro
       - ./ftw-cve.yaml:/ftw-cve.yaml:ro
+      - ./ftw-crs.yaml:/ftw-crs.yaml:ro
+      # The CRS's regression tests, for the crs pass (scripts/ftw-run.sh fetches them).
+      - ${CRS_TESTS:-./crs-tests}:/crs-tests:ro
       - logs:/var/log/web:ro
       - ${FTW_OUT:-./out}:/out
 

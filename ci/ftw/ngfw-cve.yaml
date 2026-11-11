@@ -10,3 +10,6 @@ response:
   status: 403
 rules:
   builtin: [cve]
+# The built-in sets alone, in a webfast built with the CRS engine too.
+engines:
+  crs: false

@@ -198,7 +198,7 @@ pub(crate) mod tests {
             ),
         ];
         let (rules, _) =
-            crate::config::compose(&crate::config::RulesConfig::default(), std::path::Path::new(".")).unwrap();
+            crate::config::compose(&crate::config::RulesConfig::default(), std::path::Path::new("."), None).unwrap();
         let prefilter = |id: &str| -> Vec<&str> {
             let rule = rules.iter().find(|r| r.rule.id == id).expect("the built-in rule");
             rule.rule.prefilter.iter().map(String::as_str).collect()

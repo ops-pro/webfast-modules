@@ -136,38 +136,13 @@ pub fn write(log: &EventLog, compiled: &Compiled, record: &Record<'_>) {
                 evaluation.phase.name()
             );
             for (i, hit) in evaluation.hits.iter().enumerate() {
-                let rule = &compiled.rules[hit.rule as usize];
                 if i > 0 {
                     line.push(',');
                 }
-                line.push_str(r#"{"id":""#);
-                json_escape(line, &rule.id);
-                line.push('"');
-                if let Some(number) = rule.number {
-                    // The rule by number, where test tools look for it (go-ftw's `ruleId`).
-                    let _ = write!(line, r#","ruleId":{number}"#);
+                match &hit.engine {
+                    Some(rule) => engine_hit(line, rule, hit),
+                    None => builtin_hit(line, &compiled.rules[hit.rule as usize], hit),
                 }
-                line.push_str(r#","set":""#);
-                json_escape(line, &rule.set);
-                let _ = write!(
-                    line,
-                    r#"","score":{},"severity":"{}""#,
-                    rule.score,
-                    rule.severity.name()
-                );
-                if let Some(confidence) = rule.confidence {
-                    let _ = write!(line, r#","confidence":"{}""#, confidence.name());
-                }
-                line.push_str(r#","tags":"#);
-                strings(line, &rule.tags);
-                if !rule.refs.is_empty() {
-                    refs(line, &rule.refs);
-                }
-                line.push_str(r#","target":""#);
-                json_escape(line, &hit.target);
-                line.push_str(r#"","matched":""#);
-                json_escape(line, &hit.matched);
-                line.push_str("\"}");
             }
             line.push(']');
         } else {
@@ -182,6 +157,69 @@ pub fn write(log: &EventLog, compiled: &Compiled, record: &Record<'_>) {
         &request_fields,
         &fields,
     );
+}
+
+/// A hit of a built-in rule, as a JSON object.
+fn builtin_hit(line: &mut String, rule: &super::compile::CompiledRule, hit: &super::engine::Hit) {
+    line.push_str(r#"{"id":""#);
+    json_escape(line, &rule.id);
+    line.push('"');
+    if let Some(number) = rule.number {
+        // The rule by number, where test tools look for it (go-ftw's `ruleId`).
+        let _ = write!(line, r#","ruleId":{number}"#);
+    }
+    line.push_str(r#","set":""#);
+    json_escape(line, &rule.set);
+    let _ = write!(
+        line,
+        r#"","score":{},"severity":"{}""#,
+        rule.score,
+        rule.severity.name()
+    );
+    if let Some(confidence) = rule.confidence {
+        let _ = write!(line, r#","confidence":"{}""#, confidence.name());
+    }
+    line.push_str(r#","tags":"#);
+    strings(line, &rule.tags);
+    if !rule.refs.is_empty() {
+        refs(line, &rule.refs);
+    }
+    target_matched(line, hit);
+}
+
+/// A hit of a rule engine's rule (src/plugin.rs), as a JSON object: its message in place of the
+/// built-in rules' references.
+fn engine_hit(line: &mut String, rule: &super::plugin::EngineRule, hit: &super::engine::Hit) {
+    line.push_str(r#"{"id":""#);
+    json_escape(line, &rule.id);
+    line.push('"');
+    if let Some(number) = rule.number {
+        let _ = write!(line, r#","ruleId":{number}"#);
+    }
+    line.push_str(r#","set":""#);
+    json_escape(line, &rule.set);
+    let _ = write!(line, r#"","score":{},"severity":"{}""#, hit.score, rule.severity.name());
+    line.push_str(r#","tags":"#);
+    strings(line, &rule.tags);
+    if !rule.msg.is_empty() {
+        line.push_str(r#","msg":""#);
+        json_escape(line, &rule.msg);
+        line.push('"');
+    }
+    if let Some(data) = &hit.data {
+        line.push_str(r#","data":""#);
+        json_escape(line, data);
+        line.push('"');
+    }
+    target_matched(line, hit);
+}
+
+fn target_matched(line: &mut String, hit: &super::engine::Hit) {
+    line.push_str(r#","target":""#);
+    json_escape(line, &hit.target);
+    line.push_str(r#"","matched":""#);
+    json_escape(line, &hit.matched);
+    line.push_str("\"}");
 }
 
 /// A JSON array of strings, written into `line`.
@@ -266,11 +304,17 @@ mod tests {
         evaluation.phase = Phase::Upload;
         evaluation.hits.push(Hit {
             rule: 0,
+            engine: None,
+            score: 0,
+            data: None,
             target: "upload.ext".into(),
             matched: "php".into(),
         });
         evaluation.hits.push(Hit {
             rule: 1,
+            engine: None,
+            score: 0,
+            data: None,
             target: "upload.ext".into(),
             matched: "exe".into(),
         });

@@ -1,0 +1,43 @@
+[package]
+name = "webfast-ngfw-crs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+# The crate's code is MIT OR Apache-2.0, as the workspace's; the CRS it bundles (crs/) is
+# Apache-2.0 (crs/LICENSE).
+license = "(MIT OR Apache-2.0) AND Apache-2.0"
+repository.workspace = true
+publish.workspace = true
+description = "The OWASP Core Rule Set for webfast's request filter: CRS v4 in SecLang, parsed and interpreted, plugged into webfast-ngfw as a rule engine"
+readme = "../../README.md"
+keywords = ["http", "waf", "crs", "modsecurity", "seclang"]
+categories = ["web-programming::http-server"]
+include = ["src/**", "crs/**", "Cargo.toml"]
+
+[lib]
+name = "webfast_ngfw_crs"
+path = "src/lib.rs"
+
+[dependencies]
+# The rule engine API (src/plugin.rs there), the parsed request and its body.
+webfast-ngfw = { path = "../webfast-ngfw", version = "0.1", default-features = false }
+# The operators: @rx on bytes, @pm/@pmFromFile as one automaton, @ipMatch, @detectSQLi/@detectXSS
+# (libinjection, as the CRS's 942100 and 941100 ask), the byte searches.
+regex.workspace = true
+aho-corasick.workspace = true
+ipnet.workspace = true
+barbacane-libinjection.workspace = true
+memchr.workspace = true
+# t:sha1 (the CRS's sampling and IP collections).
+aws-lc-rs.workspace = true
+anyhow.workspace = true
+bytes.workspace = true
+http.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+# The filter with the engine registered, over requests (src/tests.rs).
+webfast-core = { workspace = true, features = ["test-harness"] }
+tokio.workspace = true
+tempfile.workspace = true

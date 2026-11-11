@@ -1,4 +1,4 @@
-# The checks of scripts/check.sh on every push and pull request: formatting, clippy on both crates
+# The checks of scripts/check.sh on every push and pull request: formatting, clippy on the crates
 # of the workspace with every feature and without the defaults (the filter without the challenge),
 # the tests on x86-64 and arm64, the tests on the minimum Rust (Cargo.toml's rust-version), and
 # cargo-deny (advisories, licenses, bans, sources); and the filter's go-ftw tests against webfast's
@@ -77,8 +77,10 @@ jobs:
 
   # The filter's go-ftw tests, blackbox: webfast's binary (its dev-ci, which follows this
   # repository's main) built static with this checkout's modules in place of the git ones, then
-  # scripts/ftw-run.sh: every built-in set, then the cve set alone. That the files are current
-  # (src/ftw.rs writes them from the rules' examples and tests/corpus/) is a test of `test`.
+  # scripts/ftw-run.sh: every built-in set, then the cve set alone, then — once webfast's dev-ci
+  # has the ngfw-crs feature — the CRS release's regression tests on the CRS engine. That the
+  # files are current (src/ftw.rs writes them from the rules' examples and tests/corpus/) is a
+  # test of `test`.
   ftw:
     runs-on: ubuntu-24.04
     steps:
@@ -98,20 +100,29 @@ jobs:
         with:
           workspaces: webfast
       - name: webfast with this checkout's modules (static, as released)
+        id: build
         working-directory: webfast
         env:
           RUSTFLAGS: -Ctarget-feature=+crt-static
-        run: >-
-          cargo build --release -p webfast --target x86_64-unknown-linux-musl
-          --features webfast-ngfw/libinjection
-          --config 'patch."https://github.com/ops-pro/webfast-modules".webfast-ngfw.path="../webfast-modules/crates/webfast-ngfw"'
-          --config 'patch."https://github.com/ops-pro/webfast-modules".webfast-challenge.path="../webfast-modules/crates/webfast-challenge"'
-      - name: go-ftw, every built-in set, then the cve set alone
+        run: |
+          patch='patch."https://github.com/ops-pro/webfast-modules"'
+          args=(--features webfast-ngfw/libinjection
+            --config "$patch.webfast-ngfw.path=\"../webfast-modules/crates/webfast-ngfw\""
+            --config "$patch.webfast-challenge.path=\"../webfast-modules/crates/webfast-challenge\"")
+          passes="all cve"
+          if grep -q '^ngfw-crs = ' crates/webfast/Cargo.toml; then
+            args+=(--features ngfw-crs
+              --config "$patch.webfast-ngfw-crs.path=\"../webfast-modules/crates/webfast-ngfw-crs\"")
+            passes="$passes crs"
+          fi
+          cargo build --release -p webfast --target x86_64-unknown-linux-musl "${args[@]}"
+          echo "passes=$passes" >> "$GITHUB_OUTPUT"
+      - name: go-ftw, every built-in set, the cve set alone, the CRS
         working-directory: webfast-modules
         env:
           WEBFAST_BIN: ../webfast/target/x86_64-unknown-linux-musl/release/webfast
           FTW_OUT: ${{ runner.temp }}/ftw
-        run: bash scripts/ftw-run.sh all cve
+        run: bash scripts/ftw-run.sh ${{ steps.build.outputs.passes }}
       - if: failure()
         uses: actions/upload-artifact@v4
         with:

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/webfast-ngfw", "crates/webfast-challenge"]
+members = ["crates/webfast-ngfw", "crates/webfast-ngfw-crs", "crates/webfast-challenge"]
 
 [workspace.package]
 version = "0.1.2"

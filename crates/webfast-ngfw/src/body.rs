@@ -186,6 +186,16 @@ pub fn starts_with_ignore_case(text: &str, prefix: &str) -> bool {
     text.len() >= prefix.len() && text.as_bytes()[..prefix.len()].eq_ignore_ascii_case(prefix.as_bytes())
 }
 
+/// Whether the request has a body: a `Content-Length` over 0, or a `Transfer-Encoding`.
+pub fn has_body(headers: &HeaderMap) -> bool {
+    headers.contains_key(http::header::TRANSFER_ENCODING)
+        || headers
+            .get(http::header::CONTENT_LENGTH)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .is_some_and(|n| n > 0)
+}
+
 /// The kind of a body whose type is one of `types`; `None`: not inspected.
 pub fn kind_of(headers: &HeaderMap, types: &[String]) -> Option<Kind> {
     let media = media_type(headers)?;

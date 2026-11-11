@@ -942,7 +942,7 @@ rules:
         }
         // The built-in sets load, without their rules on the detectors.
         let config = super::super::config::RulesConfig::default();
-        let (rules, _) = super::super::config::compose(&config, Path::new(".")).unwrap();
+        let (rules, _) = super::super::config::compose(&config, Path::new("."), None).unwrap();
         assert!(!rules.iter().any(|r| r.rule.operator.is_libinjection()));
         assert!(rules.iter().any(|r| r.rule.id == "wf-942-100"));
         compile(&rules, Mode::Block, &[]).unwrap();

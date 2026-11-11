@@ -13,8 +13,9 @@ fixed at compile time.
 
 ```
 crates/webfast-ngfw         the NGFW request filter     webfast_ngfw::MODULE, Ngfw, response::NgfwResponses
+crates/webfast-ngfw-crs     the OWASP CRS in the filter webfast_ngfw_crs::ENGINE (a rule engine of the filter)
 crates/webfast-challenge    the browser challenge       webfast_challenge::MODULE, ChallengeEndpoint, Asking, Level
-docs/ngfw.md, docs/challenge.md
+docs/ngfw.md, docs/ngfw-crs.md, docs/challenge.md
 ```
 
 ## The request filter: `webfast-ngfw`
@@ -60,6 +61,23 @@ the operators `detect_sqli` and `detect_xss`, and two built-in rules on them (wf
 wf-941-150), run only on values their prefilter lets through; without it a file whose rule uses
 them does not load and the two built-in rules that use them are left out. [docs/ngfw.md](docs/ngfw.md).
 
+## The OWASP CRS in the filter: `webfast-ngfw-crs`
+
+The [OWASP Core Rule Set](https://coreruleset.org/) v4 as it is released, in SecLang, run inside
+the request filter: the crate reads the CRS's directives, variables, operators, transformations
+and actions and interprets them itself (no ModSecurity or Coraza), as a rule engine of the filter
+(`webfast_ngfw::plugin`), so its hits are the filter's — one decision against the filter's
+threshold, one log line with each CRS rule's id, one ban list, one challenge. The CRS is bundled
+(a pinned release, its request rules, phases 1 and 2); the paranoia level, the CRS's own variables
+and the site's SecLang exclusions are set in the filter's file (`engines.crs`). While it is on, the
+built-in sets are off but `cve`. webfast has it with its cargo feature `ngfw-crs`.
+[docs/ngfw-crs.md](docs/ngfw-crs.md).
+
+```yaml
+engines:
+  crs: { paranoia: 2, after: [crs/exclusions.conf] }
+```
+
 ## The browser challenge: `webfast-challenge`
 
 A client proves it is a browser before a site answers it — by accepting a cookie, by running a
@@ -95,7 +113,7 @@ example.com {
 ## Building and testing
 
 ```sh
-cargo test --workspace                                   # unit tests and the end-to-end tests of both crates
+cargo test --workspace                                   # unit tests and the end-to-end tests of the crates
 cargo clippy --workspace --all-targets -- -D warnings
 cargo clippy -p webfast-ngfw --all-targets --no-default-features -- -D warnings   # the filter without the challenge and libinjection
 scripts/check.sh                                         # the CI checks, in Docker
@@ -115,7 +133,8 @@ files' JSON Schema is [docs/ngfw-rules.schema.json](docs/ngfw-rules.schema.json)
 with `ci/ftw/compose.yaml` (go-ftw, albedo as the backend, the images pinned): once with every
 built-in set, as the filter ships, and once with the cve set alone. The binary is webfast's,
 built with this checkout's modules (the script's header has the command; CI's `ftw` job builds
-it from webfast's `dev-ci`).
+it from webfast's `dev-ci`). Its `crs` pass runs the CRS release's own regression tests against
+a binary built with the `ngfw-crs` feature.
 
 The end-to-end tests boot a server from a Caddyfile text with the core's test harness
 (`webfast_core::harness`, the core's cargo feature `test-harness`) and a composition of the crate

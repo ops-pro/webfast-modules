@@ -1,3 +1,4 @@
 /target/
 /.cargo/config.toml
 /ci/ftw/out/
+/ci/ftw/crs-tests/

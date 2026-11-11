@@ -26,6 +26,10 @@
 //! crate, detect.rs), the `detect_sqli` and `detect_xss` operators run its detectors on the values
 //! a rule's prefilter let through.
 //!
+//! Rule engines of other crates (plugin.rs: the OWASP CRS of webfast-ngfw-crs) run in the `head`
+//! and `body` phases after the built-in rules, their hits counted in the same evaluation; an
+//! engine with rules for the body runs them on a request without one too (with no body).
+//!
 //! What a clean GET costs: one `ArcSwap` load, the allow list and ban list lookups, the geo
 //! lookups when databases are given, and one pass of each head group's automaton over its target.
 
@@ -41,6 +45,7 @@ pub mod geo;
 pub mod iplist;
 pub mod log;
 pub mod multipart;
+pub mod plugin;
 pub mod response;
 pub mod rule;
 pub mod rules;
@@ -103,6 +108,8 @@ pub struct State {
     honeypots: Vec<PathPattern>,
     matcher: Option<Match>,
     has_feeds: bool,
+    /// The rule engines on (plugin.rs), in the order they run.
+    engines: Vec<plugin::Loaded>,
     /// What the challenges of this module are asked with (`response.challenge`).
     #[cfg(feature = "challenge")]
     asking: webfast_challenge::Asking,
@@ -307,7 +314,8 @@ impl State {
         if file.access.ban.then == ban::Then::Challenge {
             config::needs_challenge("access.ban.then: challenge")?;
         }
-        let (rules, mut loaded) = config::compose(&file.rules, base)?;
+        let (rules, mut loaded) = config::compose(&file.rules, base, plugin::builtin_sets(&file.engines))?;
+        let engines = plugin::load(&file.engines, base)?;
         let compiled = compile::compile(&rules, file.mode, &file.rules.exclusions)?;
         let test_marker = match file.log.as_ref().and_then(|l| l.test_marker.as_deref()) {
             Some(name) => {
@@ -448,6 +456,7 @@ impl State {
                 except: patterns(&m.except_paths),
             }),
             has_feeds: !access.ip.feeds.is_empty(),
+            engines,
             #[cfg(feature = "challenge")]
             asking: asking(&file.response)?,
         })
@@ -475,6 +484,37 @@ impl State {
                 .headers
                 .insert(name.clone(), code.unwrap_or_else(|| HeaderValue::from_static("--")));
         }
+    }
+
+    /// Whether a rule engine has rules for `phase`.
+    fn engines_run(&self, phase: Phase) -> bool {
+        self.engines.iter().any(|e| e.engine.runs_in(phase))
+    }
+
+    /// The rule engines' rules of `phase`, after the built-in ones, until the request is decided.
+    fn run_engines(&self, phase: Phase, input: &Input<'_>, evaluation: &mut Evaluation) {
+        if self.engines.is_empty() || evaluation.is_stopped() {
+            return;
+        }
+        let mut states = std::mem::take(&mut evaluation.engines);
+        states.resize_with(self.engines.len(), || None);
+        evaluation.phase = phase;
+        for (loaded, state) in self.engines.iter().zip(states.iter_mut()) {
+            if evaluation.is_stopped() {
+                break;
+            }
+            if !loaded.engine.runs_in(phase) {
+                continue;
+            }
+            let mut found = plugin::Found {
+                evaluation,
+                log_matched: self.log_matched,
+                hidden: input.hidden,
+                mode: self.mode,
+            };
+            loaded.engine.run(phase, input, state, &mut found);
+        }
+        evaluation.engines = states;
     }
 
     fn country(&self, ip: IpAddr) -> Option<[u8; 2]> {
@@ -593,6 +633,15 @@ impl Ngfw {
             if !ids.is_empty() {
                 lines.push(format!("{what}: {}", ids.join(", ")));
             }
+        }
+        for engine in &state.engines {
+            lines.extend(
+                engine
+                    .engine
+                    .summary()
+                    .into_iter()
+                    .map(|line| format!("engine {}: {line}", engine.name)),
+            );
         }
         for warning in &loaded.warnings {
             lines.push(format!("warning: {warning}"));
@@ -938,7 +987,7 @@ impl Ngfw {
             }
             Pre::Go => {}
         }
-        let mut stopped = false;
+        let kind;
         {
             let input = Input {
                 parts,
@@ -954,19 +1003,32 @@ impl Ngfw {
             evaluation.run_phase(compiled, Phase::Connection, &input, state.log_matched);
             if !matches!(evaluation.decision(state.threshold), Decision::Pass) {
                 evaluation.run_phase(compiled, Phase::Head, &input, state.log_matched);
+                state.run_engines(Phase::Head, &input, &mut evaluation);
             }
-            match self.settle(&state, &mut evaluation, client.conn, parts, ip, geo) {
-                Settled::Go => {}
-                Settled::Stop => stopped = true,
-                Settled::Refuse(response) => return Head::Refuse(response),
+            // The body, when its type is listed, there are rules for it, and the head let it on.
+            let passed = matches!(evaluation.decision(state.threshold), Decision::Pass);
+            let body_rules =
+                compiled.has_phase(Phase::Body) || compiled.has_phase(Phase::Upload) || state.engines_run(Phase::Body);
+            kind = if !passed && body_rules {
+                body::kind_of(&input.parts.headers, &state.body_types).or_else(|| {
+                    // A rule engine reads every body, as ModSecurity does (its own rules choose
+                    // how to parse it): one of a type not listed, or of none, as text.
+                    (state.engines_run(Phase::Body) && body::has_body(&input.parts.headers)).then_some(body::Kind::Text)
+                })
+            } else {
+                None
+            };
+            // No body to read: an engine's rules for it still run, on none, before the decision.
+            if kind.is_none() && !passed {
+                state.run_engines(Phase::Body, &input, &mut evaluation);
             }
         }
-        // The body, when its type is listed, there are rules for it, and the head let it on.
-        let kind = if !stopped && (compiled.has_phase(Phase::Body) || compiled.has_phase(Phase::Upload)) {
-            body::kind_of(&parts.headers, &state.body_types)
-        } else {
-            None
+        let stopped = match self.settle(&state, &mut evaluation, client.conn, parts, ip, geo) {
+            Settled::Go => false,
+            Settled::Stop => true,
+            Settled::Refuse(response) => return Head::Refuse(response),
         };
+        let kind = if stopped { None } else { kind };
         match kind {
             Some(kind) => Head::Body(Pending {
                 state,
@@ -1026,6 +1088,7 @@ impl Ngfw {
         if multipart && !matches!(evaluation.decision(state.threshold), Decision::Pass) {
             evaluation.run_phase(compiled, Phase::Upload, &input, state.log_matched);
         }
+        state.run_engines(Phase::Body, &input, &mut evaluation);
         if let Settled::Refuse(response) = self.settle(&state, &mut evaluation, client.conn, parts, ip, geo) {
             return Err(response);
         }
@@ -1034,7 +1097,8 @@ impl Ngfw {
     }
 
     /// A request let through: the headers of the `header` actions that hit, the geo header, and
-    /// the `scored` line when it scored and `log.passed` is on.
+    /// the `scored` line when a rule hit (scored under the threshold, or one that only logs: an
+    /// engine's rule above its blocking level) and `log.passed` is on.
     fn finish(&self, state: &State, evaluation: &Evaluation, parts: &mut http::request::Parts, ip: IpAddr, geo: Peer) {
         let compiled = &state.compiled;
         for &rule in &evaluation.header_rules {
@@ -1043,7 +1107,7 @@ impl Ngfw {
             }
         }
         state.set_geo_header(parts, geo);
-        if state.log_passed && (evaluation.score > 0 || evaluation.shadow > 0) && !evaluation.hits.is_empty() {
+        if state.log_passed && !evaluation.hits.is_empty() {
             log::write(
                 &state.log,
                 compiled,

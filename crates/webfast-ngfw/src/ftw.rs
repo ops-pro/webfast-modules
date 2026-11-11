@@ -691,7 +691,7 @@ fn the_examples_on_the_connection_hold() {
     use super::config::{RulesConfig, compose};
     use super::engine::{Evaluation, Input};
     use super::rule::{Mode, Phase};
-    let (rules, _) = compose(&RulesConfig::default(), Path::new(".")).unwrap();
+    let (rules, _) = compose(&RulesConfig::default(), Path::new("."), None).unwrap();
     let compiled = compile(&rules, Mode::Block, &[]).unwrap();
     let mut ran = 0;
     let mut wrong = Vec::new();

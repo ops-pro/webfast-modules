@@ -246,7 +246,14 @@ pub struct ResponseData<'a> {
 /// One rule that matched.
 #[derive(Debug, Clone)]
 pub struct Hit {
+    /// The built-in engine's rule (an index into `Compiled::rules`); unused for an engine's hit.
     pub rule: u32,
+    /// The rule of a rule engine (src/plugin.rs) that matched.
+    pub engine: Option<std::sync::Arc<super::plugin::EngineRule>>,
+    /// An engine's hit: the score it gave (a built-in rule's is the rule's).
+    pub score: u32,
+    /// An engine's hit: the rule's words on the match (the CRS's `logdata`), cut to `log.matched`.
+    pub data: Option<String>,
     pub target: String,
     /// Cut to `log.matched` bytes; `REDACTED` for a hidden parameter.
     pub matched: String,
@@ -308,6 +315,8 @@ pub struct Evaluation {
     /// The buffers' generation when they were prepared for this request; 0: not yet (a prepared
     /// generation is 1 or more).
     prepared: u64,
+    /// The rule engines' states of this request, by the engine's place in the file's list.
+    pub(crate) engines: Vec<super::plugin::EngineState>,
 }
 
 /// What led to a rule's test: a literal of its own found at the range (decided), a prefilter
@@ -340,6 +349,84 @@ impl Evaluation {
     /// Nothing more runs: a `block`/`ban` action fired, or a `pass`.
     fn stopped(&self) -> bool {
         self.blocked.is_some() || self.passed
+    }
+
+    /// Whether the request is decided whatever runs next (a `block`, `ban`, `challenge` or `pass`).
+    pub fn is_stopped(&self) -> bool {
+        self.stopped()
+    }
+
+    /// A rule engine's hit (src/plugin.rs): written as the built-in engine's are, counted under the
+    /// file's `mode`.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn engine_hit(
+        &mut self,
+        rule: std::sync::Arc<super::plugin::EngineRule>,
+        target: &str,
+        matched: String,
+        data: Option<String>,
+        score: u32,
+        verdict: super::plugin::Verdict,
+        mode: Mode,
+    ) {
+        use super::plugin::Verdict;
+        self.hits.push(Hit {
+            rule: u32::MAX,
+            engine: Some(rule),
+            score,
+            data,
+            target: target.to_string(),
+            matched,
+        });
+        let action = match verdict {
+            Verdict::Score => Action::Score,
+            Verdict::Block => Action::Block,
+            Verdict::Log => Action::Log,
+            Verdict::Pass => Action::Pass,
+        };
+        self.count(action, mode, score);
+    }
+
+    /// A hit's action applied: its score added (to the shadow sum for `log_only`, to the
+    /// challenge's for `challenge` too), or the request decided.
+    fn count(&mut self, action: Action, mode: Mode, score: u32) {
+        let counted = mode != Mode::LogOnly;
+        let soft = mode == Mode::Challenge;
+        match action {
+            Action::Score | Action::Header => {
+                if counted {
+                    self.score += score;
+                    if soft {
+                        self.challenge_score += score;
+                    }
+                } else {
+                    self.shadow += score;
+                }
+            }
+            Action::Block => {
+                if counted {
+                    self.blocked = Some(if soft { Blocked::Challenge } else { Blocked::Block });
+                } else {
+                    self.shadow_blocked = true;
+                }
+            }
+            Action::Challenge => {
+                if counted {
+                    self.blocked = Some(Blocked::Challenge);
+                } else {
+                    self.shadow_blocked = true;
+                }
+            }
+            Action::Ban => {
+                if counted {
+                    self.blocked = Some(Blocked::Ban);
+                } else {
+                    self.shadow_blocked = true;
+                }
+            }
+            Action::Log => {}
+            Action::Pass => self.passed = true,
+        }
     }
 
     /// The challenge the decision asked for was passed by the client already: the request goes on
@@ -1048,49 +1135,16 @@ impl Evaluation {
         };
         self.hits.push(Hit {
             rule: index,
+            engine: None,
+            score: 0,
+            data: None,
             target: target.to_string(),
             matched,
         });
-        let counted = rule.mode != Mode::LogOnly;
-        let soft = rule.mode == Mode::Challenge;
-        match rule.action {
-            Action::Score | Action::Header => {
-                if counted {
-                    self.score += rule.score;
-                    if soft {
-                        self.challenge_score += rule.score;
-                    }
-                } else {
-                    self.shadow += rule.score;
-                }
-                if rule.action == Action::Header {
-                    self.header_rules.push(index);
-                }
-            }
-            Action::Block => {
-                if counted {
-                    self.blocked = Some(if soft { Blocked::Challenge } else { Blocked::Block });
-                } else {
-                    self.shadow_blocked = true;
-                }
-            }
-            Action::Challenge => {
-                if counted {
-                    self.blocked = Some(Blocked::Challenge);
-                } else {
-                    self.shadow_blocked = true;
-                }
-            }
-            Action::Ban => {
-                if counted {
-                    self.blocked = Some(Blocked::Ban);
-                } else {
-                    self.shadow_blocked = true;
-                }
-            }
-            Action::Log => {}
-            Action::Pass => self.passed = true,
+        if rule.action == Action::Header {
+            self.header_rules.push(index);
         }
+        self.count(rule.action, rule.mode, rule.score);
     }
 
     fn excluded(
@@ -2919,7 +2973,7 @@ rules:
         }
 
         fn builtin() -> Compiled {
-            let (rules, _) = compose(&RulesConfig::default(), Path::new(".")).unwrap();
+            let (rules, _) = compose(&RulesConfig::default(), Path::new("."), None).unwrap();
             compile(&rules, Mode::Block, &[]).unwrap()
         }
 

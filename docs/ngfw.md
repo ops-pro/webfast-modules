@@ -51,7 +51,7 @@ mode: block                       # block | log_only | challenge: the default fo
 log:
   output: /var/log/web/ngfw.log   # stdout | stderr | discard | a file, relative to this file
   matched: 200                    # bytes of the matched text written per hit; 0: none
-  passed: false                   # also write requests that scored but stayed under the threshold
+  passed: false                   # also write requests let through with hits (under the threshold, or hits that only log)
   test_marker: X-CRS-Test         # off by default: a request with this header also writes a marker line (go-ftw)
 threshold: 5                      # the sum of scores from which a request is refused
 response:
@@ -69,6 +69,7 @@ response:
 
 rules:
   builtin: all                    # all | none | [protocol, scanners, traversal, rfi, cmdi, php, sqli, xss, template, upload, leakage, cve]
+                                  # not given: all, or with a rule engine on the sets it leaves on (the CRS: [cve])
   include: [rules/site.yaml]      # the site's own files, relative to this file, applied in order
   disable: [wf-942-130, wf-921-*] # ids, or masks with a trailing `*`
   disable_tags: [wordpress]       # every rule with one of these tags (a site that is not WordPress)
@@ -124,10 +125,14 @@ access:                           # decided first, on the client's address alone
 match:                            # where the module runs at all; none: everywhere
   hosts: ['*.example.com']
   except_paths: ['/internal/*']
+
+engines:                          # the rule engines this webfast is built with (see "Rule engines")
+  crs:                            # the OWASP CRS (cargo feature ngfw-crs; docs/ngfw-crs.md); `crs: false`: off
+    paranoia: 1
 ```
 
 Every key is optional but `threshold`, which defaults to 5, and `rules.builtin`, which defaults to
-`all`. Sizes take `KiB`/`MiB`/`B`; durations `s`, `m`, `h`, `d`. Unknown keys are errors (serde
+`all` (with a rule engine on, to the sets it names: see "Rule engines"). Sizes take `KiB`/`MiB`/`B`; durations `s`, `m`, `h`, `d`. Unknown keys are errors (serde
 `deny_unknown_fields`).
 
 **The feeds.** A feed is fetched at start and whenever its `every` is out (an HTTP GET, at most
@@ -176,6 +181,22 @@ any of the tags is left out; a tag no rule has is a warning). A rule in an inclu
 `id` of an earlier rule **replaces** it, keeping its position; so one built-in rule is patched
 without touching its set, and `builtin: none` with `include` gives a site its own rules only.
 `validate` prints the resulting count per set and every replaced, overridden and disabled id.
+
+**Rule engines** (src/plugin.rs). A ruleset with semantics of its own runs beside the built-in
+rules as an engine another crate brings and webfast's composition registers: the OWASP CRS,
+`webfast-ngfw-crs` (webfast's cargo feature `ngfw-crs`, docs/ngfw-crs.md). A registered engine is
+on: `engines.<name>` is its configuration, `engines.<name>: false` turns it off, and a name this
+webfast was not built with is an error — but with `false`, so one file serves builds with and
+without the engine. An engine runs in the `head` and `body` phases after the
+built-in rules, over the same parsed request; its rules for the body run on a request without one
+too (with no body, before the head's decision), and a body of a type `body.types` does not list,
+or of none, is read for it as text (up to `max_inspect`), as ModSecurity reads every body. Its hits are the filter's: added to the same
+scores under the file's `mode`, written in the same line (each with the engine's rule id as `id`
+and `ruleId`, its `set` as `crs-942`, its `msg`), counted for the ban list, answered with the same
+refusal or challenge. While an engine is on, `rules.builtin` left out means the sets the engine
+leaves on — the CRS numbers its rules as the built-in sets do, so with it only `cve` stays —
+and `rules.builtin` given is as written. `rules.disable`, `override` and `exclusions` are the
+built-in rules'; an engine has its own (the CRS: SecLang files and `remove`).
 
 **Where it runs.** `match` and the `exclusions` use the Caddyfile's matcher semantics:
 `host_matches` for hosts, `path_matches` for paths (decoded, cleaned, case-insensitive). `access`
@@ -636,6 +657,7 @@ crates/webfast-ngfw/src/
   ban.rs        Bans: counts per address in a window, bans for a duration, sweep
   multipart.rs  the parts of a multipart prefix: name, filename, type, head bytes
   log.rs        the event lines (through webfast_core::eventlog)
+  plugin.rs     the rule engines of other crates: Factory, Engine, Found, register(); evaluate() for their tests
   rules/        the built-in sets, one YAML each, plus mod.rs with BUILTIN_VERSION and include_str!
 ```
 
