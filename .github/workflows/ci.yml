@@ -106,16 +106,21 @@ jobs:
           RUSTFLAGS: -Ctarget-feature=+crt-static
         run: |
           patch='patch."https://github.com/ops-pro/webfast-modules"'
-          args=(--features webfast-ngfw/libinjection
-            --config "$patch.webfast-ngfw.path=\"../webfast-modules/crates/webfast-ngfw\""
+          patches=(--config "$patch.webfast-ngfw.path=\"../webfast-modules/crates/webfast-ngfw\""
             --config "$patch.webfast-challenge.path=\"../webfast-modules/crates/webfast-challenge\"")
+          packages=(-p webfast-ngfw -p webfast-challenge)
+          features=(--features webfast-ngfw/libinjection)
           passes="all cve"
           if grep -q '^ngfw-crs = ' crates/webfast/Cargo.toml; then
-            args+=(--features ngfw-crs
-              --config "$patch.webfast-ngfw-crs.path=\"../webfast-modules/crates/webfast-ngfw-crs\"")
+            patches+=(--config "$patch.webfast-ngfw-crs.path=\"../webfast-modules/crates/webfast-ngfw-crs\"")
+            packages+=(-p webfast-ngfw-crs)
+            features+=(--features ngfw-crs)
             passes="$passes crs"
           fi
-          cargo build --release -p webfast --target x86_64-unknown-linux-musl "${args[@]}"
+          # The checkout's crates into webfast's lock first: cargo drops a patch whose version is not
+          # the one the lock has (this checkout after a version bump) and builds the git modules.
+          cargo update "${packages[@]}" "${patches[@]}"
+          cargo build --release -p webfast --target x86_64-unknown-linux-musl "${features[@]}" "${patches[@]}"
           echo "passes=$passes" >> "$GITHUB_OUTPUT"
       - name: go-ftw, every built-in set, the cve set alone, the CRS
         working-directory: webfast-modules

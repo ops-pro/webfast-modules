@@ -13,7 +13,9 @@
 # the filter's log and the server's own log of each pass go to FTW_OUT (default ci/ftw/out).
 #
 # The binary: webfast built with this checkout's modules, static as webfast's release builds it,
-# e.g. in a webfast checkout next to this one
+# e.g. in a webfast checkout next to this one (first `cargo update -p webfast-ngfw -p
+# webfast-challenge` with the same two `--config`s: cargo drops a patch whose version is not the
+# one webfast's lock has, and builds the git modules)
 #   RUSTFLAGS=-Ctarget-feature=+crt-static cargo build --release -p webfast \
 #     --target x86_64-unknown-linux-musl --features webfast-ngfw/libinjection \
 #     --config 'patch."https://github.com/ops-pro/webfast-modules".webfast-ngfw.path="../webfast-modules/crates/webfast-ngfw"' \
