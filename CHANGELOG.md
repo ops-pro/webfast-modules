@@ -1,5 +1,63 @@
 # Changelog
 
+## 0.1.3 — 2026-11-11
+
+The OWASP Core Rule Set v4 inside the request filter: a new crate, `webfast-ngfw-crs`, reads the
+CRS as it is released, in SecLang, and runs it with an interpreter of its own, plugged into the
+filter as a rule engine — one decision against the filter's threshold, one log line, one ban list
+and one challenge with the built-in rules. The CRS's own regression tests pass against it (5080
+of 5231; the rest are of rules not loaded or of what httpd does before ModSecurity, each listed
+with its reason). How it differs from ModSecurity, Coraza and CrowdSec, what is not loaded and
+why the response rules are not there yet: [docs/ngfw-crs.md](docs/ngfw-crs.md#compared-with-modsecurity-coraza-and-crowdsec).
+
+Worth knowing when upgrading from 0.1.2:
+
+- Nothing changes in a webfast built without the engine (webfast's feature `ngfw-crs`, not a
+  default): `rules.builtin` left out is still every built-in set.
+- In a webfast built with it, the CRS is on in every filter file: `rules.builtin` left out means
+  `cve` alone (the CRS numbers its rules as the built-in sets do), and so the `leakage` set is
+  off and no response is looked at unless the file names it (`rules.builtin: [cve, leakage]`).
+  `engines: { crs: false }` gives the filter as before.
+- A new key, `engines` (an engine's configuration by name; `false` turns one off, also one this
+  webfast was not built with); another name is an error.
+- While an engine has rules for the body, a body of a type `body.types` does not list, or of
+  none, is read for it as text (up to `body.max_inspect`), as ModSecurity reads every body.
+- `log.passed` writes every request let through with hits, those that only log included (they
+  were written only when something scored).
+- For code that uses the crate: `engine::Hit` has the fields `engine`, `score` and `data`;
+  `config::compose` takes the engines' sets; `config::RulesConfig::builtin` is an `Option`.
+
+### Changes
+
+- **`webfast-ngfw-crs`**: CRS 4.30.0 pinned and bundled (its request rules, 901 to 944 and 999,
+  and the data files they read; Apache-2.0), byte for byte the release's. A SecLang reader and
+  compiler (directives, variables with keys, regexes, counts and exclusions, operators, actions,
+  chains, markers and `skipAfter`, `SecRuleRemove*`, `SecRuleUpdateTarget*`,
+  `SecRuleUpdateActionById`), ModSecurity's variables of a request (arguments decoded, the
+  URLENCODED, JSON, MULTIPART and XML body processors, files and part headers), the
+  transformations on bytes (`%uXXXX` folded by a best-fit table), the operators (`@rx` on bytes,
+  `@pm`/`@pmFromFile` as one automaton, the comparisons, `@within`, `@validate*`, `@ipMatch`,
+  libinjection's `@detectSQLi` and `@detectXSS`), and the interpreter (`setvar` and captures per
+  matched value, `ctl`, `MATCHED_VAR(S)`, the anomaly score at the blocking paranoia level as each
+  hit's score). Configured in the filter's file, `engines.crs`: `paranoia`, `detection_paranoia`,
+  `tx` (crs-setup's variables), `before` and `after` (the site's SecLang exclusions), `remove`.
+  Each hit in the log with the CRS rule's id as `ruleId`, its set (`crs-942`), `msg`, the target
+  and the expanded `logdata`.
+- **What it costs**: on one core, a browser's GET some 200 µs at paranoia 1 and 350 µs at 4, a
+  form POST 260 µs and 470 µs — a request's values worked once per chain of transformations, and
+  each chain's regexes behind one automaton of their prefix literals.
+- **The rule engine API** of the filter (`src/plugin.rs`): `Factory`, `Engine`, `Found`,
+  `EngineHit`, `register()`; engines run in the `head` and `body` phases after the built-in rules;
+  `plugin::evaluate()` runs one alone, for its tests.
+- **go-ftw**: a third pass, `crs` (`scripts/ftw-run.sh`, `ci/ftw/ngfw-crs.yaml` and
+  `ftw-crs.yaml`): the CRS release's regression tests, fetched by tag with the checksum checked,
+  against a webfast built with the engine. CI runs it once webfast's `dev-ci` has the feature; the
+  `all` and `cve` passes turn the CRS off. In process, `crs_regression` runs the same tests in
+  `cargo test` (ignored; `CRS_TESTS` names them).
+- docs/ngfw-crs.md (what runs, the configuration, the SecLang supported, the comparison with
+  ModSecurity, Coraza and CrowdSec, how close it is, what it costs, updating the CRS); docs/ngfw.md
+  (rule engines, `engines`, `rules.builtin`'s default); the README's crates as a table.
+
 ## 0.1.2 — 2026-11-09
 
 The filter takes up the client's TLS fingerprint (JA4) and flags a browser's User-Agent over a
